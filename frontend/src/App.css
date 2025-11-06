@@ -1,0 +1,23 @@
+.App {
+  text-align: center;
+}
+
+.dashboard-card {
+  margin-bottom: 16px;
+}
+
+.status-indicator {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 8px;
+}
+
+.status-ok {
+  background-color: #52c41a;
+}
+
+.status-error {
+  background-color: #ff4d4f;
+}

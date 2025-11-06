@@ -1,93 +1,425 @@
-# 微软 OAuth2 API 无服务器版本
+# MTBF Platform
 
-> **服务器版本在vps分支**
+A modern full-stack platform built with FastAPI, Celery, React, and Docker.
 
-🌟 **简化微软 OAuth2 认证流程，轻松集成到你的应用中！** 🌟
+## 🏗️ Architecture
 
-本项目将微软的 OAuth2 认证取件流程封装成一个简单的 API，并部署在 Vercel 的无服务器平台上。通过这个 API，你可以轻松地在你的应用中进行 OAuth2 取件功能。   
-目前已支持 **Graph API** 取件 会自动判断是否是Graph API   
-推荐使用Graph API取件 比IMAP取件速度更快 更稳定
+This project uses a monorepo structure with the following components:
 
-## 🚀 快速开始
+- **Backend** (`backend/`): FastAPI application with SQLAlchemy ORM
+- **Worker** (`worker/`): Celery workers for asynchronous task processing
+- **Frontend** (`frontend/`): React + Vite + TypeScript + Ant Design
+- **Infrastructure** (`infrastructure/`): Docker and deployment configurations
 
-1. **Star 本项目**：首先，点击右上角的 `Star` 按钮，给这个项目点个赞吧！
+## 🚀 Quick Start
 
-2. **Fork 本项目**：点击右上角的 `Fork` 按钮，将项目复制到你的 GitHub 账户下。
+### Prerequisites
 
-3. **部署到 Vercel**：
-   - 点击下面的按钮，一键部署到 Vercel。
+- Docker and Docker Compose
+- Node.js 20+ (for local frontend development)
+- Python 3.11+ (for local backend development)
 
-   [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/HChaoHui/msOauth2api)
+### Running with Docker
 
-   - 在 Vercel 部署页面，填写你的项目名称，然后点击 `Deploy` 按钮。
+1. Clone the repository and navigate to the project directory:
 
-4. **开始使用**：
-   - 部署完成后，你可以通过访问 `https://your-vercel-app.vercel.app` 查看接口文档来进行使用。
-   - **注意**：Vercel 的链接在国内可能无法访问，请使用自己的域名进行 CNAME 解析或使用 Cloudflare 进行代理。
+```bash
+git clone <repository-url>
+cd mtbf-platform
+```
 
-## 📚 API 文档
+2. Copy the environment file:
 
-### 📧 获取最新的一封邮件
+```bash
+cp .env.example .env
+```
 
-- **方法**: `GET`
-- **URL**: `/api/mail-new`
-- **描述**: 获取最新的一封邮件。如果邮件中含有6位数字验证码，会自动提取。
-- **参数说明**:
-  - `refresh_token` (必填): 用于身份验证的 refresh_token。
-  - `client_id` (必填): 客户端 ID。
-  - `email` (必填): 邮箱地址。
-  - `mailbox` (必填): 邮箱文件夹，支持的值为 `INBOX` 或 `Junk`。
-  - `response_type` (可选): 返回格式，支持的值为 `json` 或 `html`，默认为 `json`。
+3. Build and start all services:
 
-### 📨 获取全部邮件
+```bash
+docker compose up --build
+```
 
-- **方法**: `GET`
-- **URL**: `/api/mail-all`
-- **描述**: 获取全部邮件。如果邮件中含有6位数字验证码，会自动提取。
-- **参数说明**:
-  - `refresh_token` (必填): 用于身份验证的 refresh_token。
-  - `client_id` (必填): 客户端 ID。
-  - `email` (必填): 邮箱地址。
-  - `mailbox` (必填): 邮箱文件夹，支持的值为 `INBOX` 或 `Junk`。
+4. Access the services:
 
-### 🗑️ 清空收件箱
+- **Frontend**: http://localhost:5173
+- **Backend API**: http://localhost:8000
+- **API Documentation**: http://localhost:8000/docs
+- **Health Check**: http://localhost:8000/health
 
-- **方法**: `GET`
-- **URL**: `/api/process-inbox`
-- **描述**: 清空收件箱。
-- **参数说明**:
-  - `refresh_token` (必填): 用于身份验证的 refresh_token。
-  - `client_id` (必填): 客户端 ID。
-  - `email` (必填): 邮箱地址。
+### Using Make Commands
 
-### 🗑️ 清空垃圾箱
+The project includes a Makefile with helpful commands:
 
-- **方法**: `GET`
-- **URL**: `/api/process-junk`
-- **描述**: 清空垃圾箱。
-- **参数说明**:
-  - `refresh_token` (必填): 用于身份验证的 refresh_token。
-  - `client_id` (必填): 客户端 ID。
-  - `email` (必填): 邮箱地址。
+```bash
+make help          # Show all available commands
+make build         # Build all Docker containers
+make up            # Start all services
+make down          # Stop all services
+make logs          # View logs from all services
+make restart       # Restart all services
+make clean         # Remove all containers and volumes
+make test          # Run backend tests
+make lint          # Run linters
+make format        # Format code
+make install       # Install dependencies locally
+```
 
-## 🖼️ 效果图
+## 📦 Services
 
-![Demo](https://raw.githubusercontent.com/HChaoHui/msOauth2api/refs/heads/main/img/demo.png)
+### API Service
 
-## 🤝 贡献
+- **Port**: 8000
+- **Technology**: FastAPI + SQLAlchemy
+- **Database**: PostgreSQL
+- **Features**:
+  - RESTful API endpoints
+  - Health check endpoint
+  - SQLAlchemy ORM integration
+  - Pydantic settings management
+  - Structured logging
 
-欢迎大家贡献代码！如果你有任何问题或建议，请提交 [Issue](https://github.com/HChaoHui/msOauth2api/issues) 或联系作者邮箱：**[z@unix.xin]**。
+### Worker Service
 
-## 📜 许可证
+- **Technology**: Celery
+- **Broker**: Redis
+- **Features**:
+  - Asynchronous task processing
+  - Periodic tasks via Celery Beat
+  - Shared configuration with API
+  - Heartbeat monitoring
 
-本项目采用 [MIT 许可证](LICENSE)。
+### Scheduler Service
 
-## 💖 支持
+- **Technology**: Celery Beat
+- **Features**:
+  - Periodic task scheduling
+  - Cron-based task execution
 
-如果你喜欢这个项目，欢迎给它一个 Star ⭐️ 或者进行赞助：
+### Web Service
 
-![Buy](https://github.com/HChaoHui/msOauth2api/blob/main/img/Buy.JPG?raw=true)
+- **Port**: 5173 (development), 80 (production)
+- **Technology**: React + Vite + TypeScript
+- **UI Library**: Ant Design
+- **Features**:
+  - Modern React hooks-based architecture
+  - TypeScript for type safety
+  - Ant Design component library
+  - API client with Axios
+  - React Router for navigation
 
----
+### PostgreSQL
 
-**Happy Coding!** 🎉
+- **Port**: 5432
+- **Database**: mtbf
+- **User**: postgres (configurable)
+
+### Redis
+
+- **Port**: 6379
+- **Purpose**: Celery broker and result backend
+
+## 🛠️ Development
+
+### Backend Development
+
+#### Local Setup
+
+```bash
+cd backend
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements-dev.txt
+```
+
+#### Running Tests
+
+```bash
+cd backend
+pytest
+```
+
+#### Code Quality
+
+```bash
+# Linting
+ruff check .
+
+# Formatting
+black .
+isort .
+```
+
+#### Database Migrations
+
+```bash
+# Create a new migration
+make migration
+
+# Apply migrations
+make migrate
+```
+
+### Frontend Development
+
+#### Local Setup
+
+```bash
+cd frontend
+npm install
+```
+
+#### Running Development Server
+
+```bash
+npm run dev
+```
+
+#### Code Quality
+
+```bash
+# Linting
+npm run lint
+
+# Formatting
+npm run format
+```
+
+#### Building for Production
+
+```bash
+npm run build
+```
+
+### Worker Development
+
+The worker shares configuration with the backend and uses the same Docker network.
+
+```bash
+# View worker logs
+docker compose logs -f worker
+
+# View scheduler logs
+docker compose logs -f scheduler
+
+# Access worker shell
+make worker-shell
+```
+
+## 🔧 Configuration
+
+### Environment Variables
+
+All configuration is managed through environment variables. Copy `.env.example` to `.env` and adjust as needed:
+
+#### Database Configuration
+
+- `POSTGRES_USER`: PostgreSQL username (default: postgres)
+- `POSTGRES_PASSWORD`: PostgreSQL password (default: postgres)
+- `POSTGRES_DB`: Database name (default: mtbf)
+- `DATABASE_URL`: Full database connection string
+
+#### Redis Configuration
+
+- `REDIS_URL`: Redis connection string (default: redis://redis:6379/0)
+
+#### Celery Configuration
+
+- `CELERY_BROKER_URL`: Celery broker URL (default: redis://redis:6379/0)
+- `CELERY_RESULT_BACKEND`: Celery result backend URL (default: redis://redis:6379/0)
+
+#### Application Configuration
+
+- `DEBUG`: Enable debug mode (default: false)
+- `ENVIRONMENT`: Environment name (default: development)
+
+#### Frontend Configuration
+
+- `VITE_API_URL`: Backend API URL (default: http://localhost:8000)
+
+## 📊 Service Ports
+
+| Service    | Port | Description                    |
+|------------|------|--------------------------------|
+| Frontend   | 5173 | React development server       |
+| Backend    | 8000 | FastAPI application            |
+| PostgreSQL | 5432 | Database server                |
+| Redis      | 6379 | Cache and message broker       |
+
+## 🧪 Testing
+
+### Backend Tests
+
+```bash
+# Run all tests
+make test
+
+# Run specific test file
+cd backend
+pytest tests/test_health.py
+
+# Run with coverage
+pytest --cov=app --cov-report=html
+```
+
+### Frontend Tests
+
+```bash
+cd frontend
+npm run test  # Add test script when test suite is implemented
+```
+
+## 🐛 Troubleshooting
+
+### Services Not Starting
+
+1. Check Docker is running:
+   ```bash
+   docker ps
+   ```
+
+2. Check service logs:
+   ```bash
+   make logs
+   ```
+
+3. Rebuild containers:
+   ```bash
+   make clean
+   make build
+   make up
+   ```
+
+### Database Connection Issues
+
+1. Verify PostgreSQL is healthy:
+   ```bash
+   docker compose ps postgres
+   ```
+
+2. Check database logs:
+   ```bash
+   docker compose logs postgres
+   ```
+
+3. Connect to database directly:
+   ```bash
+   make db-shell
+   ```
+
+### Worker Not Processing Tasks
+
+1. Check Redis connection:
+   ```bash
+   make redis-cli
+   ping
+   ```
+
+2. Verify worker is running:
+   ```bash
+   docker compose ps worker
+   docker compose logs worker
+   ```
+
+3. Check Celery task queue:
+   ```bash
+   docker compose exec worker celery -A worker.celery_app inspect active
+   ```
+
+### Frontend Not Loading
+
+1. Check API connectivity:
+   ```bash
+   curl http://localhost:8000/health
+   ```
+
+2. Verify environment variables:
+   ```bash
+   cat frontend/.env
+   ```
+
+3. Clear node modules and reinstall:
+   ```bash
+   cd frontend
+   rm -rf node_modules
+   npm install
+   ```
+
+## 📝 Project Structure
+
+```
+.
+├── backend/                 # FastAPI backend
+│   ├── app/
+│   │   ├── __init__.py
+│   │   ├── main.py         # FastAPI app entry point
+│   │   ├── config.py       # Settings management
+│   │   ├── database.py     # Database setup
+│   │   └── logging_config.py
+│   ├── tests/              # Backend tests
+│   ├── requirements.txt
+│   └── Dockerfile
+├── worker/                 # Celery workers
+│   ├── worker/
+│   │   ├── __init__.py
+│   │   ├── celery_app.py  # Celery configuration
+│   │   ├── tasks.py       # Task definitions
+│   │   └── config.py
+│   ├── requirements.txt
+│   └── Dockerfile
+├── frontend/               # React frontend
+│   ├── src/
+│   │   ├── components/    # Reusable components
+│   │   ├── pages/         # Page components
+│   │   ├── services/      # API clients
+│   │   ├── App.tsx
+│   │   └── main.tsx
+│   ├── package.json
+│   └── Dockerfile
+├── infrastructure/         # Deployment configs
+├── docker-compose.yml     # Docker orchestration
+├── Makefile               # Development commands
+├── .env.example          # Environment template
+└── README.md             # This file
+```
+
+## 🔐 Security Notes
+
+- Never commit `.env` files to version control
+- Change default passwords in production
+- Use secrets management for production deployments
+- Enable HTTPS in production
+- Implement proper authentication and authorization
+
+## 🚢 Deployment
+
+### Production Considerations
+
+1. **Environment Variables**: Use proper secrets management
+2. **Database**: Use managed PostgreSQL service
+3. **Redis**: Use managed Redis service
+4. **Scaling**: Use Kubernetes or similar orchestration
+5. **Monitoring**: Implement logging and monitoring
+6. **Backups**: Set up automated database backups
+
+### Future Extensions
+
+- Add production-grade deployment descriptors (Kubernetes/Helm)
+- Introduce Terraform for infrastructure as code
+- Implement comprehensive monitoring and alerting
+- Add CI/CD pipelines
+- Implement authentication and authorization
+- Add API rate limiting
+- Implement comprehensive logging
+
+## 📄 License
+
+[Add your license information here]
+
+## 🤝 Contributing
+
+[Add contribution guidelines here]
+
+## 📧 Contact
+
+[Add contact information here]

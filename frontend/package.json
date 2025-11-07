@@ -12,11 +12,12 @@
     "test:e2e:debug": "playwright test --debug"
   },
   "dependencies": {
+    "antd": "^5.12.8",
+    "axios": "^1.6.5",
+    "dayjs": "^1.11.19",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-router-dom": "^6.21.1",
-    "antd": "^5.12.8",
-    "axios": "^1.6.5"
+    "react-router-dom": "^6.21.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.40.1",

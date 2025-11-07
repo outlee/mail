@@ -11,6 +11,27 @@ This project uses a monorepo structure with the following components:
 - **Frontend** (`frontend/`): React + Vite + TypeScript + Ant Design
 - **Infrastructure** (`infrastructure/`): Docker and deployment configurations
 
+## ✨ Key Features
+
+### 🚨 Alerting System
+- **Policy Management**: Create and manage alert policies with customizable thresholds
+- **Multi-Channel Notifications**: Email and webhook notifications with deduplication
+- **Real-time Evaluation**: Automatic alert evaluation after KPI computation
+- **Audit Trail**: Complete alert lifecycle tracking and event logging
+- **Role-Based Access**: Granular permissions for alert management
+
+### 📊 KPI Monitoring
+- **Automated Scheduling**: Hourly rolling and daily calendar KPI computation
+- **Asset & Group Tracking**: Monitor individual assets and aggregated groups
+- **Advisory Locking**: Prevent concurrent computation conflicts
+- **Task Tracking**: Complete audit trail of KPI computations
+
+### 🔐 Authentication & Authorization
+- **JWT-Based Auth**: Secure access and refresh token rotation
+- **Role-Based Control**: Maintainer, Operator, and Manager roles
+- **Protected Routes**: API endpoint security with role validation
+- **Session Management**: Secure token storage and automatic refresh
+
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -344,6 +365,14 @@ npm run test  # Add test script when test suite is implemented
    rm -rf node_modules
    npm install
    ```
+
+## 📚 Documentation
+
+- **[SCHEDULING.md](./SCHEDULING.md)** - KPI scheduling system documentation
+- **[AUTH.md](./AUTH.md)** - Authentication system documentation  
+- **[ALERTING.md](./ALERTING.md)** - Alerting system documentation
+- **[SETUP.md](./SETUP.md)** - Development setup guide
+- **[VERIFICATION.md](./VERIFICATION.md)** - System verification guide
 
 ## 📝 Project Structure
 

@@ -45,6 +45,20 @@ class Settings(BaseSettings):
     kpi_calendar_schedule_hour: str = "0"
     kpi_batch_size: int = 100
 
+    # Alerting
+    smtp_host: str = "localhost"
+    smtp_port: int = 587
+    smtp_use_tls: bool = True
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = "alerts@mtbf-platform.com"
+    smtp_from_name: str = "MTBF Platform Alerts"
+
+    # Webhook
+    webhook_timeout_seconds: int = 30
+    webhook_retry_attempts: int = 3
+    webhook_retry_backoff_seconds: int = 5
+
 
 @lru_cache()
 def get_settings() -> Settings:

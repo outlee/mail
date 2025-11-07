@@ -1,4 +1,6 @@
+import json
 import logging
+import smtplib
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional
@@ -7,6 +9,12 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.models import (
+    AlertComparator,
+    AlertEventLog,
+    AlertOccurrence,
+    AlertPolicy,
+    AlertSeverity,
+    AlertStatus,
     Asset,
     Group,
     KPISnapshot,
@@ -206,6 +214,17 @@ class KPIService:
             db.add(snapshot)
             db.commit()
 
+            # Trigger alert evaluation for the new snapshot
+            try:
+                from worker.celery_app import app as celery_app
+                celery_app.send_task(
+                    "worker.tasks.evaluate_alerts_task",
+                    args=[None, snapshot_id]
+                )
+                logger.info(f"Triggered alert evaluation for asset {asset_id} snapshot {snapshot_id}")
+            except Exception as e:
+                logger.warning(f"Failed to trigger alert evaluation for asset {asset_id}: {e}")
+
             logger.info(f"Recomputed KPI for asset {asset_id}: {value}")
             return True
 
@@ -251,6 +270,17 @@ class KPIService:
             )
             db.add(snapshot)
             db.commit()
+
+            # Trigger alert evaluation for new snapshot
+            try:
+                from worker.celery_app import app as celery_app
+                celery_app.send_task(
+                    "worker.tasks.evaluate_alerts_task",
+                    args=[None, snapshot_id]
+                )
+                logger.info(f"Triggered alert evaluation for group {group_id} snapshot {snapshot_id}")
+            except Exception as e:
+                logger.warning(f"Failed to trigger alert evaluation for group {group_id}: {e}")
 
             logger.info(f"Recomputed KPI for group {group_id}: {value}")
             return True
@@ -330,3 +360,423 @@ class TaskRunService:
         if task_name:
             query = query.filter(TaskRun.task_name == task_name)
         return query.order_by(TaskRun.created_at.desc()).offset(skip).limit(limit).all()
+
+
+class AlertPolicyService:
+    @staticmethod
+    def create_policy(
+        db: Session,
+        name: str,
+        description: Optional[str],
+        metric_name: str,
+        comparator: AlertComparator,
+        threshold: float,
+        severity: AlertSeverity = AlertSeverity.MEDIUM,
+        deduplication_window_minutes: int = 60,
+        email_recipients: Optional[list[str]] = None,
+        webhook_url: Optional[str] = None,
+        webhook_secret: Optional[str] = None,
+        is_active: bool = True,
+    ) -> AlertPolicy:
+        policy_id = str(uuid.uuid4())
+        db_policy = AlertPolicy(
+            id=policy_id,
+            name=name,
+            description=description,
+            metric_name=metric_name,
+            comparator=comparator,
+            threshold=threshold,
+            severity=severity,
+            deduplication_window_minutes=deduplication_window_minutes,
+            email_recipients=json.dumps(email_recipients) if email_recipients else None,
+            webhook_url=webhook_url,
+            webhook_secret=webhook_secret,
+            is_active=is_active,
+        )
+        db.add(db_policy)
+        db.commit()
+        db.refresh(db_policy)
+        return db_policy
+
+    @staticmethod
+    def get_policy_by_id(db: Session, policy_id: str) -> Optional[AlertPolicy]:
+        return db.query(AlertPolicy).filter(AlertPolicy.id == policy_id).first()
+
+    @staticmethod
+    def get_policy_by_name(db: Session, name: str) -> Optional[AlertPolicy]:
+        return db.query(AlertPolicy).filter(AlertPolicy.name == name).first()
+
+    @staticmethod
+    def list_policies(
+        db: Session, skip: int = 0, limit: int = 100, active_only: bool = True
+    ) -> list[AlertPolicy]:
+        query = db.query(AlertPolicy)
+        if active_only:
+            query = query.filter(AlertPolicy.is_active == True)
+        return query.order_by(AlertPolicy.created_at.desc()).offset(skip).limit(limit).all()
+
+    @staticmethod
+    def update_policy(
+        db: Session, policy_id: str, **kwargs
+    ) -> Optional[AlertPolicy]:
+        policy = AlertPolicyService.get_policy_by_id(db, policy_id)
+        if not policy:
+            return None
+
+        if 'email_recipients' in kwargs and kwargs['email_recipients'] is not None:
+            kwargs['email_recipients'] = json.dumps(kwargs['email_recipients'])
+
+        for key, value in kwargs.items():
+            if hasattr(policy, key) and value is not None:
+                setattr(policy, key, value)
+
+        db.commit()
+        db.refresh(policy)
+        return policy
+
+    @staticmethod
+    def delete_policy(db: Session, policy_id: str) -> bool:
+        policy = AlertPolicyService.get_policy_by_id(db, policy_id)
+        if policy:
+            db.delete(policy)
+            db.commit()
+            return True
+        return False
+
+
+class AlertOccurrenceService:
+    @staticmethod
+    def create_occurrence(
+        db: Session,
+        policy_id: str,
+        asset_id: Optional[str],
+        group_id: Optional[str],
+        kpi_snapshot_id: str,
+        severity: AlertSeverity,
+        current_value: float,
+        threshold_value: float,
+        message: str,
+    ) -> AlertOccurrence:
+        occurrence_id = str(uuid.uuid4())
+        db_occurrence = AlertOccurrence(
+            id=occurrence_id,
+            policy_id=policy_id,
+            asset_id=asset_id,
+            group_id=group_id,
+            kpi_snapshot_id=kpi_snapshot_id,
+            status=AlertStatus.ACTIVE,
+            severity=severity,
+            current_value=current_value,
+            threshold_value=threshold_value,
+            message=message,
+        )
+        db.add(db_occurrence)
+        db.commit()
+        db.refresh(db_occurrence)
+        return db_occurrence
+
+    @staticmethod
+    def get_occurrence_by_id(db: Session, occurrence_id: str) -> Optional[AlertOccurrence]:
+        return db.query(AlertOccurrence).filter(AlertOccurrence.id == occurrence_id).first()
+
+    @staticmethod
+    def list_occurrences(
+        db: Session,
+        skip: int = 0,
+        limit: int = 100,
+        status: Optional[AlertStatus] = None,
+        severity: Optional[AlertSeverity] = None,
+        asset_id: Optional[str] = None,
+        group_id: Optional[str] = None,
+    ) -> tuple[list[AlertOccurrence], int]:
+        query = db.query(AlertOccurrence)
+        
+        if status:
+            query = query.filter(AlertOccurrence.status == status)
+        if severity:
+            query = query.filter(AlertOccurrence.severity == severity)
+        if asset_id:
+            query = query.filter(AlertOccurrence.asset_id == asset_id)
+        if group_id:
+            query = query.filter(AlertOccurrence.group_id == group_id)
+
+        total = query.count()
+        occurrences = query.order_by(AlertOccurrence.created_at.desc()).offset(skip).limit(limit).all()
+        
+        return occurrences, total
+
+    @staticmethod
+    def acknowledge_alert(
+        db: Session, occurrence_id: str, user_id: str, message: Optional[str] = None
+    ) -> Optional[AlertOccurrence]:
+        occurrence = AlertOccurrenceService.get_occurrence_by_id(db, occurrence_id)
+        if occurrence and occurrence.status == AlertStatus.ACTIVE:
+            occurrence.status = AlertStatus.ACKNOWLEDGED
+            occurrence.acknowledged_at = datetime.utcnow()
+            occurrence.acknowledged_by = user_id
+            db.commit()
+            db.refresh(occurrence)
+            
+            # Log the acknowledgment
+            AlertEventLogService.create_event_log(
+                db, occurrence_id, "ACKNOWLEDGED", 
+                f"Alert acknowledged by user {user_id}" + (f": {message}" if message else ""),
+                user_id=user_id
+            )
+            
+        return occurrence
+
+    @staticmethod
+    def resolve_alert(
+        db: Session, occurrence_id: str, user_id: str, message: Optional[str] = None
+    ) -> Optional[AlertOccurrence]:
+        occurrence = AlertOccurrenceService.get_occurrence_by_id(db, occurrence_id)
+        if occurrence and occurrence.status in [AlertStatus.ACTIVE, AlertStatus.ACKNOWLEDGED]:
+            occurrence.status = AlertStatus.RESOLVED
+            occurrence.resolved_at = datetime.utcnow()
+            occurrence.resolved_by = user_id
+            db.commit()
+            db.refresh(occurrence)
+            
+            # Log the resolution
+            AlertEventLogService.create_event_log(
+                db, occurrence_id, "RESOLVED", 
+                f"Alert resolved by user {user_id}" + (f": {message}" if message else ""),
+                user_id=user_id
+            )
+            
+        return occurrence
+
+    @staticmethod
+    def check_deduplication_window(
+        db: Session, policy_id: str, asset_id: Optional[str], group_id: Optional[str], window_minutes: int
+    ) -> bool:
+        """Check if there's an active alert within the deduplication window."""
+        cutoff_time = datetime.utcnow() - timedelta(minutes=window_minutes)
+        
+        query = db.query(AlertOccurrence).filter(
+            AlertOccurrence.policy_id == policy_id,
+            AlertOccurrence.status.in_([AlertStatus.ACTIVE, AlertStatus.ACKNOWLEDGED]),
+            AlertOccurrence.created_at > cutoff_time
+        )
+        
+        if asset_id:
+            query = query.filter(AlertOccurrence.asset_id == asset_id)
+        if group_id:
+            query = query.filter(AlertOccurrence.group_id == group_id)
+            
+        return query.first() is not None
+
+
+class AlertEventLogService:
+    @staticmethod
+    def create_event_log(
+        db: Session,
+        alert_occurrence_id: str,
+        event_type: str,
+        message: str,
+        metadata: Optional[dict] = None,
+        user_id: Optional[str] = None,
+    ) -> AlertEventLog:
+        log_id = str(uuid.uuid4())
+        db_log = AlertEventLog(
+            id=log_id,
+            alert_occurrence_id=alert_occurrence_id,
+            event_type=event_type,
+            message=message,
+            metadata=json.dumps(metadata) if metadata else None,
+            user_id=user_id,
+        )
+        db.add(db_log)
+        db.commit()
+        db.refresh(db_log)
+        return db_log
+
+    @staticmethod
+    def get_event_logs(
+        db: Session, alert_occurrence_id: str, skip: int = 0, limit: int = 50
+    ) -> list[AlertEventLog]:
+        return (
+            db.query(AlertEventLog)
+            .filter(AlertEventLog.alert_occurrence_id == alert_occurrence_id)
+            .order_by(AlertEventLog.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+
+
+class AlertEvaluationService:
+    @staticmethod
+    def evaluate_threshold(value: float, comparator: AlertComparator, threshold: float) -> bool:
+        """Evaluate if a value crosses the threshold based on the comparator."""
+        if comparator == AlertComparator.GREATER_THAN:
+            return value > threshold
+        elif comparator == AlertComparator.GREATER_THAN_OR_EQUAL:
+            return value >= threshold
+        elif comparator == AlertComparator.LESS_THAN:
+            return value < threshold
+        elif comparator == AlertComparator.LESS_THAN_OR_EQUAL:
+            return value <= threshold
+        elif comparator == AlertComparator.EQUAL:
+            return value == threshold
+        elif comparator == AlertComparator.NOT_EQUAL:
+            return value != threshold
+        return False
+
+    @staticmethod
+    def evaluate_policies_for_snapshot(
+        db: Session, snapshot: KPISnapshot
+    ) -> list[AlertOccurrence]:
+        """Evaluate all active policies against a KPI snapshot."""
+        triggered_alerts = []
+        
+        # Get active policies for the metric type
+        policies = db.query(AlertPolicy).filter(
+            AlertPolicy.is_active == True,
+            AlertPolicy.metric_name == snapshot.kpi_type
+        ).all()
+        
+        for policy in policies:
+            # Check if threshold is crossed
+            if AlertEvaluationService.evaluate_threshold(
+                snapshot.value, policy.comparator, policy.threshold
+            ):
+                # Check deduplication window
+                if not AlertOccurrenceService.check_deduplication_window(
+                    db, policy.id, snapshot.asset_id, snapshot.group_id, policy.deduplication_window_minutes
+                ):
+                    # Create alert occurrence
+                    message = f"{policy.metric_name} {policy.comparator.value} {policy.threshold} (current: {snapshot.value})"
+                    
+                    occurrence = AlertOccurrenceService.create_occurrence(
+                        db=db,
+                        policy_id=policy.id,
+                        asset_id=snapshot.asset_id,
+                        group_id=snapshot.group_id,
+                        kpi_snapshot_id=snapshot.id,
+                        severity=policy.severity,
+                        current_value=snapshot.value,
+                        threshold_value=policy.threshold,
+                        message=message,
+                    )
+                    
+                    # Log the trigger event
+                    AlertEventLogService.create_event_log(
+                        db, occurrence.id, "TRIGGERED", 
+                        f"Alert triggered: {message}"
+                    )
+                    
+                    triggered_alerts.append(occurrence)
+                    
+                    # Send notifications
+                    AlertNotificationService.send_notifications(db, occurrence, policy)
+        
+        return triggered_alerts
+
+
+class AlertNotificationService:
+    @staticmethod
+    def send_notifications(db: Session, occurrence: AlertOccurrence, policy: AlertPolicy) -> bool:
+        """Send notifications for an alert occurrence."""
+        success = True
+        
+        # Send email notifications
+        if policy.email_recipients:
+            try:
+                email_success = AlertNotificationService._send_email_notification(occurrence, policy)
+                if email_success:
+                    occurrence.last_notification_at = datetime.utcnow()
+                    db.commit()
+                    
+                    # Log notification
+                    AlertEventLogService.create_event_log(
+                        db, occurrence.id, "NOTIFIED", 
+                        f"Email notifications sent to {policy.email_recipients}"
+                    )
+                else:
+                    success = False
+            except Exception as e:
+                logger.error(f"Failed to send email notification: {e}")
+                success = False
+        
+        # Send webhook notification
+        if policy.webhook_url:
+            try:
+                webhook_success = AlertNotificationService._send_webhook_notification(occurrence, policy)
+                if webhook_success:
+                    # Log notification
+                    AlertEventLogService.create_event_log(
+                        db, occurrence.id, "NOTIFIED", 
+                        f"Webhook notification sent to {policy.webhook_url}"
+                    )
+                else:
+                    success = False
+            except Exception as e:
+                logger.error(f"Failed to send webhook notification: {e}")
+                success = False
+        
+        return success
+
+    @staticmethod
+    def _send_email_notification(occurrence: AlertOccurrence, policy: AlertPolicy) -> bool:
+        """Send email notification (placeholder implementation)."""
+        try:
+            recipients = json.loads(policy.email_recipients) if policy.email_recipients else []
+            if not recipients:
+                return True
+            
+            # This is a placeholder - in a real implementation, you'd use SMTP settings
+            # from config and a proper email template
+            logger.info(f"Sending email alert to {recipients}: {occurrence.message}")
+            
+            # TODO: Implement actual email sending with SMTP
+            # For now, we'll just log it
+            return True
+            
+        except Exception as e:
+            logger.error(f"Email notification failed: {e}")
+            return False
+
+    @staticmethod
+    def _send_webhook_notification(occurrence: AlertOccurrence, policy: AlertPolicy) -> bool:
+        """Send webhook notification (placeholder implementation)."""
+        try:
+            import hashlib
+            import hmac
+            
+            # Prepare webhook payload
+            payload = {
+                "alert_id": occurrence.id,
+                "policy_id": occurrence.policy_id,
+                "policy_name": policy.name,
+                "severity": occurrence.severity.value,
+                "status": occurrence.status.value,
+                "message": occurrence.message,
+                "current_value": occurrence.current_value,
+                "threshold_value": occurrence.threshold_value,
+                "asset_id": occurrence.asset_id,
+                "group_id": occurrence.group_id,
+                "created_at": occurrence.created_at.isoformat(),
+            }
+            
+            # Generate signature if secret is provided
+            headers = {"Content-Type": "application/json"}
+            if policy.webhook_secret:
+                payload_str = json.dumps(payload, sort_keys=True)
+                signature = hmac.new(
+                    policy.webhook_secret.encode(),
+                    payload_str.encode(),
+                    hashlib.sha256
+                ).hexdigest()
+                headers["X-Alert-Signature"] = f"sha256={signature}"
+            
+            # TODO: Implement actual HTTP request to webhook URL
+            # For now, we'll just log it
+            logger.info(f"Sending webhook to {policy.webhook_url}: {payload}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Webhook notification failed: {e}")
+            return False

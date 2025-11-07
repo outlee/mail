@@ -1,6 +1,9 @@
 """Initialize database tables."""
 from app.database import Base, engine
 from app.models import (
+    AlertEventLog,
+    AlertOccurrence,
+    AlertPolicy,
     Asset,
     Group,
     KPISnapshot,

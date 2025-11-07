@@ -9,6 +9,13 @@ from app.database import get_db
 from app.dependencies import get_current_user, require_role
 from app.models import UserRole
 from app.schemas import (
+    AlertAcknowledgeRequest,
+    AlertListResponse,
+    AlertOccurrenceResponse,
+    AlertPolicyCreate,
+    AlertPolicyResponse,
+    AlertPolicyUpdate,
+    AlertResolveRequest,
     KPIRecomputeRequest,
     KPISnapshotResponse,
     MeResponse,
@@ -26,6 +33,9 @@ from app.security import (
     hash_password,
 )
 from app.services import (
+    AlertEvaluationService,
+    AlertOccurrenceService,
+    AlertPolicyService,
     KPIService,
     RefreshTokenService,
     TaskRunService,
@@ -34,11 +44,13 @@ from app.services import (
 
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
 kpi_router = APIRouter(prefix="/kpis", tags=["kpis"])
+alerts_router = APIRouter(prefix="/alerts", tags=["alerts"])
 settings = get_settings()
 
 router = APIRouter(prefix="/api/v1")
 router.include_router(auth_router)
 router.include_router(kpi_router)
+router.include_router(alerts_router)
 
 
 @auth_router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -297,4 +309,295 @@ async def get_task_run_status(
         error_message=task_run.error_message,
         items_processed=task_run.items_processed,
         created_at=task_run.created_at,
+    )
+
+
+# Alert Policy Routes
+@alerts_router.post("/policies", response_model=AlertPolicyResponse, status_code=status.HTTP_201_CREATED)
+async def create_alert_policy(
+    policy_data: AlertPolicyCreate,
+    db: Session = Depends(get_db),
+    current_user = Depends(require_role([UserRole.MAINTAINER, UserRole.OPERATOR])),
+):
+    # Check if policy name already exists
+    existing_policy = AlertPolicyService.get_policy_by_name(db, policy_data.name)
+    if existing_policy:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Policy with this name already exists",
+        )
+    
+    policy = AlertPolicyService.create_policy(
+        db=db,
+        name=policy_data.name,
+        description=policy_data.description,
+        metric_name=policy_data.metric_name,
+        comparator=policy_data.comparator,
+        threshold=policy_data.threshold,
+        severity=policy_data.severity,
+        deduplication_window_minutes=policy_data.deduplication_window_minutes,
+        email_recipients=policy_data.email_recipients,
+        webhook_url=policy_data.webhook_url,
+        webhook_secret=policy_data.webhook_secret,
+        is_active=policy_data.is_active,
+    )
+    
+    return AlertPolicyResponse(
+        id=policy.id,
+        name=policy.name,
+        description=policy.description,
+        metric_name=policy.metric_name,
+        comparator=policy.comparator,
+        threshold=policy.threshold,
+        severity=policy.severity,
+        deduplication_window_minutes=policy.deduplication_window_minutes,
+        email_recipients=policy.email_recipients,
+        webhook_url=policy.webhook_url,
+        webhook_secret=policy.webhook_secret,
+        is_active=policy.is_active,
+        created_at=policy.created_at,
+        updated_at=policy.updated_at,
+    )
+
+
+@alerts_router.get("/policies", response_model=list[AlertPolicyResponse])
+async def list_alert_policies(
+    skip: int = 0,
+    limit: int = 100,
+    active_only: bool = True,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user),
+):
+    policies = AlertPolicyService.list_policies(db, skip, limit, active_only)
+    return [
+        AlertPolicyResponse(
+            id=policy.id,
+            name=policy.name,
+            description=policy.description,
+            metric_name=policy.metric_name,
+            comparator=policy.comparator,
+            threshold=policy.threshold,
+            severity=policy.severity,
+            deduplication_window_minutes=policy.deduplication_window_minutes,
+            email_recipients=policy.email_recipients,
+            webhook_url=policy.webhook_url,
+            webhook_secret=policy.webhook_secret,
+            is_active=policy.is_active,
+            created_at=policy.created_at,
+            updated_at=policy.updated_at,
+        )
+        for policy in policies
+    ]
+
+
+@alerts_router.get("/policies/{policy_id}", response_model=AlertPolicyResponse)
+async def get_alert_policy(
+    policy_id: str,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user),
+):
+    policy = AlertPolicyService.get_policy_by_id(db, policy_id)
+    if not policy:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Policy not found",
+        )
+    
+    return AlertPolicyResponse(
+        id=policy.id,
+        name=policy.name,
+        description=policy.description,
+        metric_name=policy.metric_name,
+        comparator=policy.comparator,
+        threshold=policy.threshold,
+        severity=policy.severity,
+        deduplication_window_minutes=policy.deduplication_window_minutes,
+        email_recipients=policy.email_recipients,
+        webhook_url=policy.webhook_url,
+        webhook_secret=policy.webhook_secret,
+        is_active=policy.is_active,
+        created_at=policy.created_at,
+        updated_at=policy.updated_at,
+    )
+
+
+@alerts_router.put("/policies/{policy_id}", response_model=AlertPolicyResponse)
+async def update_alert_policy(
+    policy_id: str,
+    policy_update: AlertPolicyUpdate,
+    db: Session = Depends(get_db),
+    current_user = Depends(require_role([UserRole.MAINTAINER, UserRole.OPERATOR])),
+):
+    # Check if name is being updated and if it conflicts with existing policy
+    if policy_update.name:
+        existing_policy = AlertPolicyService.get_policy_by_name(db, policy_update.name)
+        if existing_policy and existing_policy.id != policy_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Policy with this name already exists",
+            )
+    
+    policy = AlertPolicyService.update_policy(
+        db, policy_id, **policy_update.model_dump(exclude_unset=True)
+    )
+    if not policy:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Policy not found",
+        )
+    
+    return AlertPolicyResponse(
+        id=policy.id,
+        name=policy.name,
+        description=policy.description,
+        metric_name=policy.metric_name,
+        comparator=policy.comparator,
+        threshold=policy.threshold,
+        severity=policy.severity,
+        deduplication_window_minutes=policy.deduplication_window_minutes,
+        email_recipients=policy.email_recipients,
+        webhook_url=policy.webhook_url,
+        webhook_secret=policy.webhook_secret,
+        is_active=policy.is_active,
+        created_at=policy.created_at,
+        updated_at=policy.updated_at,
+    )
+
+
+@alerts_router.delete("/policies/{policy_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_alert_policy(
+    policy_id: str,
+    db: Session = Depends(get_db),
+    current_user = Depends(require_role([UserRole.MAINTAINER])),
+):
+    success = AlertPolicyService.delete_policy(db, policy_id)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Policy not found",
+        )
+
+
+# Alert Events Routes
+@alerts_router.get("/events", response_model=AlertListResponse)
+async def list_alert_events(
+    skip: int = 0,
+    limit: int = 100,
+    status: str = None,
+    severity: str = None,
+    asset_id: str = None,
+    group_id: str = None,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user),
+):
+    from app.models import AlertStatus, AlertSeverity
+    
+    # Convert string parameters to enums if provided
+    status_enum = AlertStatus(status) if status else None
+    severity_enum = AlertSeverity(severity) if severity else None
+    
+    occurrences, total = AlertOccurrenceService.list_occurrences(
+        db, skip, limit, status_enum, severity_enum, asset_id, group_id
+    )
+    
+    return AlertListResponse(
+        alerts=[
+            AlertOccurrenceResponse(
+                id=occurrence.id,
+                policy_id=occurrence.policy_id,
+                asset_id=occurrence.asset_id,
+                group_id=occurrence.group_id,
+                kpi_snapshot_id=occurrence.kpi_snapshot_id,
+                status=occurrence.status,
+                severity=occurrence.severity,
+                current_value=occurrence.current_value,
+                threshold_value=occurrence.threshold_value,
+                message=occurrence.message,
+                last_notification_at=occurrence.last_notification_at,
+                acknowledged_at=occurrence.acknowledged_at,
+                acknowledged_by=occurrence.acknowledged_by,
+                resolved_at=occurrence.resolved_at,
+                resolved_by=occurrence.resolved_by,
+                created_at=occurrence.created_at,
+                updated_at=occurrence.updated_at,
+            )
+            for occurrence in occurrences
+        ],
+        total=total,
+        page=skip // limit + 1 if limit > 0 else 1,
+        size=limit,
+    )
+
+
+@alerts_router.post("/events/{alert_id}/acknowledge", response_model=AlertOccurrenceResponse)
+async def acknowledge_alert(
+    alert_id: str,
+    ack_request: AlertAcknowledgeRequest,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user),
+):
+    occurrence = AlertOccurrenceService.acknowledge_alert(
+        db, alert_id, ack_request.user_id, ack_request.message
+    )
+    if not occurrence:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Alert not found or cannot be acknowledged",
+        )
+    
+    return AlertOccurrenceResponse(
+        id=occurrence.id,
+        policy_id=occurrence.policy_id,
+        asset_id=occurrence.asset_id,
+        group_id=occurrence.group_id,
+        kpi_snapshot_id=occurrence.kpi_snapshot_id,
+        status=occurrence.status,
+        severity=occurrence.severity,
+        current_value=occurrence.current_value,
+        threshold_value=occurrence.threshold_value,
+        message=occurrence.message,
+        last_notification_at=occurrence.last_notification_at,
+        acknowledged_at=occurrence.acknowledged_at,
+        acknowledged_by=occurrence.acknowledged_by,
+        resolved_at=occurrence.resolved_at,
+        resolved_by=occurrence.resolved_by,
+        created_at=occurrence.created_at,
+        updated_at=occurrence.updated_at,
+    )
+
+
+@alerts_router.post("/events/{alert_id}/resolve", response_model=AlertOccurrenceResponse)
+async def resolve_alert(
+    alert_id: str,
+    resolve_request: AlertResolveRequest,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user),
+):
+    occurrence = AlertOccurrenceService.resolve_alert(
+        db, alert_id, resolve_request.user_id, resolve_request.message
+    )
+    if not occurrence:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Alert not found or cannot be resolved",
+        )
+    
+    return AlertOccurrenceResponse(
+        id=occurrence.id,
+        policy_id=occurrence.policy_id,
+        asset_id=occurrence.asset_id,
+        group_id=occurrence.group_id,
+        kpi_snapshot_id=occurrence.kpi_snapshot_id,
+        status=occurrence.status,
+        severity=occurrence.severity,
+        current_value=occurrence.current_value,
+        threshold_value=occurrence.threshold_value,
+        message=occurrence.message,
+        last_notification_at=occurrence.last_notification_at,
+        acknowledged_at=occurrence.acknowledged_at,
+        acknowledged_by=occurrence.acknowledged_by,
+        resolved_at=occurrence.resolved_at,
+        resolved_by=occurrence.resolved_by,
+        created_at=occurrence.created_at,
+        updated_at=occurrence.updated_at,
     )

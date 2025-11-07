@@ -51,7 +51,7 @@ test.describe('Authentication', () => {
     await expect(page.locator('text=Please input a valid email')).toBeVisible()
   })
 
-  test('should successfully login with valid credentials', async ({ page, context }) => {
+  test('should successfully login with valid credentials', async ({ page }) => {
     await page.goto('/login')
 
     await page.fill('input[placeholder="Email"]', 'test@example.com')
@@ -62,12 +62,11 @@ test.describe('Authentication', () => {
     await page.waitForURL('/dashboard', { timeout: 10000 })
     await expect(page).toHaveURL('/dashboard')
 
-    const accessToken = await context.storageState()
     // Session storage is cleared on browser close, so we check page content instead
     await expect(page.locator('text=Dashboard')).toBeVisible()
   })
 
-  test('should persist session after reload', async ({ page, context }) => {
+  test('should persist session after reload', async ({ page }) => {
     await page.goto('/login')
     await page.fill('input[placeholder="Email"]', 'test@example.com')
     await page.fill('input[placeholder="Password"]', 'testpassword123')

@@ -25,9 +25,9 @@ function Login() {
       sessionStorage.setItem('access_token', response.access_token)
       sessionStorage.setItem('refresh_token', response.refresh_token)
       navigate('/dashboard')
-    } catch (err: any) {
-      const errorMessage =
-        err.response?.data?.detail || 'Login failed. Please try again.'
+    } catch (err: unknown) {
+      const axiosError = err as { response?: { data?: { detail?: string } } }
+      const errorMessage = axiosError.response?.data?.detail || 'Login failed. Please try again.'
       setError(errorMessage)
       form.resetFields()
     } finally {
@@ -58,6 +58,7 @@ function Login() {
             ]}
           >
             <Input
+              data-testid="email-input"
               prefix={<UserOutlined />}
               placeholder="Email"
               disabled={loading}
@@ -76,6 +77,7 @@ function Login() {
             ]}
           >
             <Input.Password
+              data-testid="password-input"
               prefix={<LockOutlined />}
               placeholder="Password"
               disabled={loading}
@@ -84,6 +86,7 @@ function Login() {
 
           <Form.Item>
             <Button
+              data-testid="login-button"
               type="primary"
               htmlType="submit"
               block

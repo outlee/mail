@@ -65,7 +65,7 @@ apiClient.interceptors.response.use(
   async (error: AxiosError) => {
     const originalRequest = error.config as any
 
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
       if (isRefreshing) {
         return new Promise((resolve) => {
           subscribeTokenRefresh((token: string) => {
@@ -85,10 +85,9 @@ apiClient.interceptors.response.use(
           return Promise.reject(error)
         }
 
-        const response = await axios.post<TokenResponse>(
-          `${API_BASE_URL}/auth/refresh`,
-          { refresh_token: refreshToken }
-        )
+        const response = await axios.post<TokenResponse>(`${API_BASE_URL}/auth/refresh`, {
+          refresh_token: refreshToken,
+        })
 
         const { access_token, refresh_token } = response.data
 

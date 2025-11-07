@@ -5,20 +5,21 @@ import { LogoutOutlined } from '@ant-design/icons'
 import Dashboard from './pages/Dashboard'
 import Login from './pages/Login'
 import ProtectedRoute from './components/ProtectedRoute'
+import AlertsLayout from './pages/AlertsLayout'
+import AlertPolicies from './pages/AlertPolicies'
+import Alerts from './pages/Alerts'
 import { authAPI } from './services/api'
 import './App.css'
 
 const { Header, Content } = Layout
 
 function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [showHeader, setShowHeader] = useState(false)
   const navigate = useNavigate()
 
   useEffect(() => {
     const token = sessionStorage.getItem('access_token')
     const path = window.location.pathname
-    setIsAuthenticated(!!token && path !== '/login')
     setShowHeader(!!token && path !== '/login')
   }, [])
 
@@ -30,7 +31,6 @@ function App() {
     } finally {
       sessionStorage.removeItem('access_token')
       sessionStorage.removeItem('refresh_token')
-      setIsAuthenticated(false)
       setShowHeader(false)
       navigate('/login')
     }
@@ -71,6 +71,17 @@ function App() {
               </ProtectedRoute>
             }
           />
+          <Route
+            path="/alerts/*"
+            element={
+              <ProtectedRoute>
+                <AlertsLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<Alerts />} />
+            <Route path="policies" element={<AlertPolicies />} />
+          </Route>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </Content>

@@ -38,6 +38,13 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
 
+    # KPI Scheduling
+    kpi_rolling_schedule_minute: str = "*"
+    kpi_rolling_schedule_hour: str = "*"
+    kpi_calendar_schedule_minute: str = "0"
+    kpi_calendar_schedule_hour: str = "0"
+    kpi_batch_size: int = 100
+
 
 @lru_cache()
 def get_settings() -> Settings:

@@ -29,6 +29,22 @@ app.conf.beat_schedule = {
         "task": "worker.tasks.heartbeat_task",
         "schedule": crontab(minute="*/1"),
     },
+    "recompute-rolling-kpis-hourly": {
+        "task": "worker.tasks.recompute_rolling_kpis_task",
+        "schedule": crontab(
+            minute=settings.kpi_rolling_schedule_minute,
+            hour=settings.kpi_rolling_schedule_hour,
+        ),
+        "args": (None, "all", None),
+    },
+    "recompute-calendar-kpis-daily": {
+        "task": "worker.tasks.recompute_calendar_kpis_task",
+        "schedule": crontab(
+            minute=settings.kpi_calendar_schedule_minute,
+            hour=settings.kpi_calendar_schedule_hour,
+        ),
+        "args": (None, "all", None),
+    },
 }
 
 if __name__ == "__main__":

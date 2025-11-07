@@ -126,6 +126,42 @@ function Dashboard() {
       <Row gutter={[16, 16]} style={{ marginTop: '24px' }}>
         <Col xs={24} sm={12} md={8}>
           <Card>
+            <div style={{ cursor: 'pointer' }} onClick={() => navigate('/overview')}>
+              <Statistic
+                title="Dashboard"
+                value="View"
+                prefix={<BellOutlined />}
+                valueStyle={{ color: '#1890ff' }}
+              />
+            </div>
+            <div style={{ marginTop: '12px' }}>
+              <Button type="primary" block onClick={() => navigate('/overview')}>
+                Go to Overview
+              </Button>
+            </div>
+          </Card>
+        </Col>
+
+        <Col xs={24} sm={12} md={8}>
+          <Card>
+            <div style={{ cursor: 'pointer' }} onClick={() => navigate('/failure-analysis')}>
+              <Statistic
+                title="Failure Analysis"
+                value="Analyze"
+                prefix={<BellOutlined />}
+                valueStyle={{ color: '#ff7a45' }}
+              />
+            </div>
+            <div style={{ marginTop: '12px' }}>
+              <Button type="primary" block onClick={() => navigate('/failure-analysis')}>
+                View Analysis
+              </Button>
+            </div>
+          </Card>
+        </Col>
+
+        <Col xs={24} sm={12} md={8}>
+          <Card>
             <div style={{ cursor: 'pointer' }} onClick={() => navigate('/alerts')}>
               <Statistic
                 title="Alerts Management"

@@ -2,6 +2,7 @@
 from app.database import Base, engine
 from app.models import (
     Asset,
+    FailureEvent,
     Group,
     KPISnapshot,
     RefreshToken,

@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from typing import Optional
 
 from celery import current_app as celery_app
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -7,14 +8,18 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import get_db
 from app.dependencies import get_current_user, require_role
-from app.models import UserRole
+from app.models import UserRole, TaskRunStatus
 from app.schemas import (
+    AssetDetailResponse,
+    AssetResponse,
+    FailureEventResponse,
     KPIRecomputeRequest,
     KPISnapshotResponse,
+    KPIStatsResponse,
     MeResponse,
     RefreshTokenRequest,
     TaskRunResponse,
-    TaskRunStatus,
+    TaskRunStatus as TaskRunStatusSchema,
     TokenResponse,
     UserRegister,
     UserResponse,
@@ -26,6 +31,9 @@ from app.security import (
     hash_password,
 )
 from app.services import (
+    AssetService,
+    DashboardService,
+    FailureEventService,
     KPIService,
     RefreshTokenService,
     TaskRunService,
@@ -34,11 +42,17 @@ from app.services import (
 
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
 kpi_router = APIRouter(prefix="/kpis", tags=["kpis"])
+assets_router = APIRouter(prefix="/assets", tags=["assets"])
+failures_router = APIRouter(prefix="/failures", tags=["failures"])
+dashboard_router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 settings = get_settings()
 
 router = APIRouter(prefix="/api/v1")
 router.include_router(auth_router)
 router.include_router(kpi_router)
+router.include_router(assets_router)
+router.include_router(failures_router)
+router.include_router(dashboard_router)
 
 
 @auth_router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -298,3 +312,103 @@ async def get_task_run_status(
         items_processed=task_run.items_processed,
         created_at=task_run.created_at,
     )
+
+
+@assets_router.get("", response_model=list[AssetResponse])
+async def list_assets(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return AssetService.list_assets(db, skip=skip, limit=limit)
+
+
+@assets_router.get("/{asset_id}", response_model=AssetDetailResponse)
+async def get_asset_detail(
+    asset_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    asset = AssetService.get_asset_by_id(db, asset_id)
+    if not asset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Asset not found",
+        )
+
+    latest_kpi = (
+        db.query(KPISnapshot)
+        .filter(KPISnapshot.asset_id == asset_id)
+        .order_by(KPISnapshot.created_at.desc())
+        .first()
+    )
+
+    recent_failures = FailureEventService.list_failure_events(
+        db, asset_id=asset_id, limit=10
+    )
+
+    return AssetDetailResponse(
+        id=asset.id,
+        name=asset.name,
+        description=asset.description,
+        created_at=asset.created_at,
+        updated_at=asset.updated_at,
+        latest_kpi=latest_kpi,
+        recent_failures=recent_failures,
+    )
+
+
+@failures_router.get("", response_model=list[FailureEventResponse])
+async def list_failures(
+    asset_id: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return FailureEventService.list_failure_events(
+        db, asset_id=asset_id, skip=skip, limit=limit
+    )
+
+
+@failures_router.get("/{failure_id}", response_model=FailureEventResponse)
+async def get_failure(
+    failure_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    failure = FailureEventService.get_failure_event(db, failure_id)
+    if not failure:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Failure not found",
+        )
+    return failure
+
+
+@dashboard_router.get("/stats", response_model=KPIStatsResponse)
+async def get_dashboard_stats(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    stats = DashboardService.get_kpi_stats(db)
+    return KPIStatsResponse(**stats)
+
+
+@dashboard_router.get("/top-assets")
+async def get_top_assets(
+    limit: int = 10,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return DashboardService.get_top_assets(db, limit=limit)
+
+
+@dashboard_router.get("/bottom-assets")
+async def get_bottom_assets(
+    limit: int = 10,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return DashboardService.get_bottom_assets(db, limit=limit)

@@ -3,11 +3,12 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 
-from sqlalchemy import text
+from sqlalchemy import desc, func, text
 from sqlalchemy.orm import Session
 
 from app.models import (
     Asset,
+    FailureEvent,
     Group,
     KPISnapshot,
     RefreshToken,
@@ -330,3 +331,141 @@ class TaskRunService:
         if task_name:
             query = query.filter(TaskRun.task_name == task_name)
         return query.order_by(TaskRun.created_at.desc()).offset(skip).limit(limit).all()
+
+
+class FailureEventService:
+    @staticmethod
+    def create_failure_event(
+        db: Session,
+        asset_id: str,
+        failure_mode: str,
+        severity: str,
+        start_time: datetime,
+        failure_code: Optional[str] = None,
+        duration_minutes: Optional[float] = None,
+        end_time: Optional[datetime] = None,
+        description: Optional[str] = None,
+    ) -> FailureEvent:
+        event_id = str(uuid.uuid4())
+        db_event = FailureEvent(
+            id=event_id,
+            asset_id=asset_id,
+            failure_mode=failure_mode,
+            failure_code=failure_code,
+            severity=severity,
+            duration_minutes=duration_minutes,
+            start_time=start_time,
+            end_time=end_time,
+            description=description,
+        )
+        db.add(db_event)
+        db.commit()
+        db.refresh(db_event)
+        return db_event
+
+    @staticmethod
+    def get_failure_event(db: Session, event_id: str) -> Optional[FailureEvent]:
+        return db.query(FailureEvent).filter(FailureEvent.id == event_id).first()
+
+    @staticmethod
+    def list_failure_events(
+        db: Session,
+        asset_id: Optional[str] = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[FailureEvent]:
+        query = db.query(FailureEvent)
+        if asset_id:
+            query = query.filter(FailureEvent.asset_id == asset_id)
+        return query.order_by(desc(FailureEvent.start_time)).offset(skip).limit(limit).all()
+
+    @staticmethod
+    def get_failures_by_mode(db: Session) -> dict[str, int]:
+        results = (
+            db.query(FailureEvent.failure_mode, func.count(FailureEvent.id))
+            .group_by(FailureEvent.failure_mode)
+            .all()
+        )
+        return {mode: count for mode, count in results}
+
+
+class DashboardService:
+    @staticmethod
+    def get_kpi_stats(db: Session) -> dict:
+        kpi_query = db.query(KPISnapshot).all()
+        if not kpi_query:
+            return {
+                "average_kpi": 0,
+                "min_kpi": 0,
+                "max_kpi": 0,
+                "total_assets": 0,
+                "total_failures": 0,
+                "failures_by_mode": {},
+            }
+
+        values = [kpi.value for kpi in kpi_query]
+        total_assets = len(db.query(Asset).all())
+        total_failures = len(db.query(FailureEvent).all())
+
+        return {
+            "average_kpi": sum(values) / len(values) if values else 0,
+            "min_kpi": min(values) if values else 0,
+            "max_kpi": max(values) if values else 0,
+            "total_assets": total_assets,
+            "total_failures": total_failures,
+            "failures_by_mode": FailureEventService.get_failures_by_mode(db),
+        }
+
+    @staticmethod
+    def get_top_assets(db: Session, limit: int = 10) -> list[dict]:
+        results = (
+            db.query(
+                Asset.id,
+                Asset.name,
+                func.avg(KPISnapshot.value).label("avg_kpi"),
+                func.count(FailureEvent.id).label("failure_count"),
+            )
+            .outerjoin(KPISnapshot, Asset.id == KPISnapshot.asset_id)
+            .outerjoin(FailureEvent, Asset.id == FailureEvent.asset_id)
+            .group_by(Asset.id, Asset.name)
+            .order_by(desc("avg_kpi"))
+            .limit(limit)
+            .all()
+        )
+
+        return [
+            {
+                "id": r[0],
+                "name": r[1],
+                "avg_kpi": float(r[2]) if r[2] else 0,
+                "failure_count": int(r[3]) if r[3] else 0,
+            }
+            for r in results
+        ]
+
+    @staticmethod
+    def get_bottom_assets(db: Session, limit: int = 10) -> list[dict]:
+        results = (
+            db.query(
+                Asset.id,
+                Asset.name,
+                func.avg(KPISnapshot.value).label("avg_kpi"),
+                func.count(FailureEvent.id).label("failure_count"),
+            )
+            .outerjoin(KPISnapshot, Asset.id == KPISnapshot.asset_id)
+            .outerjoin(FailureEvent, Asset.id == FailureEvent.asset_id)
+            .group_by(Asset.id, Asset.name)
+            .order_by("avg_kpi")
+            .limit(limit)
+            .all()
+        )
+
+        return [
+            {
+                "id": r[0],
+                "name": r[1],
+                "avg_kpi": float(r[2]) if r[2] else 0,
+                "failure_count": int(r[3]) if r[3] else 0,
+            }
+            for r in results
+        ]

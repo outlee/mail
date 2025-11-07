@@ -32,6 +32,12 @@ class Settings(BaseSettings):
     api_prefix: str = "/api"
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
 
+    # JWT Authentication
+    jwt_secret: str = "your-super-secret-key-change-in-production"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 15
+    refresh_token_expire_days: int = 7
+
 
 @lru_cache()
 def get_settings() -> Settings:

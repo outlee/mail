@@ -76,3 +76,9 @@ dist-ssr/
 *.pyd
 .Python
 build/
+
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+playwright/.auth/

@@ -98,3 +98,66 @@ class KPISnapshotResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class AssetResponse(BaseModel):
+    id: str
+    name: str
+    description: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class GroupResponse(BaseModel):
+    id: str
+    name: str
+    description: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class FailureEventResponse(BaseModel):
+    id: str
+    asset_id: str
+    failure_mode: str
+    failure_code: Optional[str] = None
+    severity: str
+    duration_minutes: Optional[float] = None
+    start_time: datetime
+    end_time: Optional[datetime] = None
+    description: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AssetDetailResponse(BaseModel):
+    id: str
+    name: str
+    description: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    latest_kpi: Optional[KPISnapshotResponse] = None
+    recent_failures: list[FailureEventResponse] = []
+
+    class Config:
+        from_attributes = True
+
+
+class KPIStatsResponse(BaseModel):
+    average_kpi: float
+    min_kpi: float
+    max_kpi: float
+    total_assets: int
+    total_failures: int
+    failures_by_mode: dict[str, int] = {}
+
+    class Config:
+        from_attributes = True

@@ -1,4 +1,4 @@
-import axios, { AxiosError, AxiosResponse } from 'axios'
+import axios, { AxiosError, AxiosRequestConfig, AxiosResponse } from 'axios'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -63,13 +63,15 @@ apiClient.interceptors.response.use(
     return response
   },
   async (error: AxiosError) => {
-    const originalRequest = error.config as any
+    const originalRequest = error.config as AxiosRequestConfig & { _retry?: boolean }
 
     if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
       if (isRefreshing) {
         return new Promise((resolve) => {
           subscribeTokenRefresh((token: string) => {
-            originalRequest.headers.Authorization = `Bearer ${token}`
+            if (originalRequest.headers) {
+              originalRequest.headers.Authorization = `Bearer ${token}`
+            }
             resolve(apiClient(originalRequest))
           })
         })
@@ -95,7 +97,9 @@ apiClient.interceptors.response.use(
         sessionStorage.setItem('refresh_token', refresh_token)
 
         apiClient.defaults.headers.common.Authorization = `Bearer ${access_token}`
-        originalRequest.headers.Authorization = `Bearer ${access_token}`
+        if (originalRequest.headers) {
+          originalRequest.headers.Authorization = `Bearer ${access_token}`
+        }
 
         isRefreshing = false
         onRefreshed(access_token)

@@ -8,6 +8,9 @@ import ProtectedRoute from './components/ProtectedRoute'
 import AlertsLayout from './pages/AlertsLayout'
 import AlertPolicies from './pages/AlertPolicies'
 import Alerts from './pages/Alerts'
+import Overview from './pages/Overview'
+import AssetDetail from './pages/AssetDetail'
+import FailureAnalysis from './pages/FailureAnalysis'
 import { authAPI } from './services/api'
 import './App.css'
 
@@ -68,6 +71,30 @@ function App() {
             element={
               <ProtectedRoute>
                 <Dashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/overview"
+            element={
+              <ProtectedRoute>
+                <Overview />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/assets/:id"
+            element={
+              <ProtectedRoute>
+                <AssetDetail />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/failure-analysis"
+            element={
+              <ProtectedRoute>
+                <FailureAnalysis />
               </ProtectedRoute>
             }
           />

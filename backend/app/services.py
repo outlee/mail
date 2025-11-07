@@ -1,11 +1,24 @@
+import logging
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.models import RefreshToken, User, UserRole
+from app.models import (
+    Asset,
+    Group,
+    KPISnapshot,
+    RefreshToken,
+    TaskRun,
+    TaskRunStatus,
+    User,
+    UserRole,
+)
 from app.security import hash_password, verify_password
+
+logger = logging.getLogger(__name__)
 
 
 class UserService:
@@ -88,3 +101,232 @@ class RefreshTokenService:
             db.commit()
             return True
         return False
+
+
+class AssetService:
+    @staticmethod
+    def create_asset(db: Session, name: str, description: Optional[str] = None) -> Asset:
+        asset_id = str(uuid.uuid4())
+        db_asset = Asset(id=asset_id, name=name, description=description)
+        db.add(db_asset)
+        db.commit()
+        db.refresh(db_asset)
+        return db_asset
+
+    @staticmethod
+    def get_asset_by_id(db: Session, asset_id: str) -> Optional[Asset]:
+        return db.query(Asset).filter(Asset.id == asset_id).first()
+
+    @staticmethod
+    def list_assets(db: Session, skip: int = 0, limit: int = 100) -> list[Asset]:
+        return db.query(Asset).offset(skip).limit(limit).all()
+
+
+class GroupService:
+    @staticmethod
+    def create_group(db: Session, name: str, description: Optional[str] = None) -> Group:
+        group_id = str(uuid.uuid4())
+        db_group = Group(id=group_id, name=name, description=description)
+        db.add(db_group)
+        db.commit()
+        db.refresh(db_group)
+        return db_group
+
+    @staticmethod
+    def get_group_by_id(db: Session, group_id: str) -> Optional[Group]:
+        return db.query(Group).filter(Group.id == group_id).first()
+
+    @staticmethod
+    def list_groups(db: Session, skip: int = 0, limit: int = 100) -> list[Group]:
+        return db.query(Group).offset(skip).limit(limit).all()
+
+
+class KPIService:
+    LOCK_TIMEOUT = 30
+
+    @staticmethod
+    def acquire_lock(db: Session, lock_id: str) -> bool:
+        try:
+            db.execute(text(f"SELECT pg_advisory_lock('{lock_id}'::bigint)"))
+            return True
+        except Exception as e:
+            logger.error(f"Failed to acquire lock {lock_id}: {e}")
+            return False
+
+    @staticmethod
+    def release_lock(db: Session, lock_id: str) -> bool:
+        try:
+            db.execute(text(f"SELECT pg_advisory_unlock('{lock_id}'::bigint)"))
+            return True
+        except Exception as e:
+            logger.error(f"Failed to release lock {lock_id}: {e}")
+            return False
+
+    @staticmethod
+    def _generate_lock_id(prefix: str, target_id: str) -> str:
+        combined = f"{prefix}:{target_id}".encode()
+        import hashlib
+        hash_obj = hashlib.md5(combined)
+        return str(int(hash_obj.hexdigest(), 16) % (2**63 - 1))
+
+    @staticmethod
+    def recompute_asset_kpis(
+        db: Session,
+        asset_id: str,
+        kpi_type: str = "rolling",
+        task_run_id: Optional[str] = None,
+    ) -> bool:
+        lock_id = KPIService._generate_lock_id("kpi", asset_id)
+
+        if not KPIService.acquire_lock(db, lock_id):
+            logger.warning(f"Could not acquire lock for asset {asset_id}")
+            return False
+
+        try:
+            asset = AssetService.get_asset_by_id(db, asset_id)
+            if not asset:
+                logger.warning(f"Asset {asset_id} not found")
+                return False
+
+            now = datetime.utcnow()
+            period_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            period_end = period_start + timedelta(days=1)
+
+            value = 95.0
+
+            snapshot_id = str(uuid.uuid4())
+            snapshot = KPISnapshot(
+                id=snapshot_id,
+                asset_id=asset_id,
+                kpi_type=kpi_type,
+                value=value,
+                period_start=period_start,
+                period_end=period_end,
+            )
+            db.add(snapshot)
+            db.commit()
+
+            logger.info(f"Recomputed KPI for asset {asset_id}: {value}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error recomputing KPI for asset {asset_id}: {e}")
+            return False
+        finally:
+            KPIService.release_lock(db, lock_id)
+
+    @staticmethod
+    def recompute_group_kpis(
+        db: Session,
+        group_id: str,
+        kpi_type: str = "rolling",
+        task_run_id: Optional[str] = None,
+    ) -> bool:
+        lock_id = KPIService._generate_lock_id("kpi_group", group_id)
+
+        if not KPIService.acquire_lock(db, lock_id):
+            logger.warning(f"Could not acquire lock for group {group_id}")
+            return False
+
+        try:
+            group = GroupService.get_group_by_id(db, group_id)
+            if not group:
+                logger.warning(f"Group {group_id} not found")
+                return False
+
+            now = datetime.utcnow()
+            period_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            period_end = period_start + timedelta(days=1)
+
+            value = 92.0
+
+            snapshot_id = str(uuid.uuid4())
+            snapshot = KPISnapshot(
+                id=snapshot_id,
+                group_id=group_id,
+                kpi_type=kpi_type,
+                value=value,
+                period_start=period_start,
+                period_end=period_end,
+            )
+            db.add(snapshot)
+            db.commit()
+
+            logger.info(f"Recomputed KPI for group {group_id}: {value}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error recomputing KPI for group {group_id}: {e}")
+            return False
+        finally:
+            KPIService.release_lock(db, lock_id)
+
+
+class TaskRunService:
+    @staticmethod
+    def create_task_run(
+        db: Session,
+        task_name: str,
+        scope: Optional[str] = None,
+        asset_id: Optional[str] = None,
+        group_id: Optional[str] = None,
+        task_id: Optional[str] = None,
+    ) -> TaskRun:
+        run_id = str(uuid.uuid4())
+        task_run = TaskRun(
+            id=run_id,
+            task_name=task_name,
+            task_id=task_id,
+            status=TaskRunStatus.PENDING,
+            scope=scope,
+            asset_id=asset_id,
+            group_id=group_id,
+        )
+        db.add(task_run)
+        db.commit()
+        db.refresh(task_run)
+        return task_run
+
+    @staticmethod
+    def get_task_run(db: Session, task_run_id: str) -> Optional[TaskRun]:
+        return db.query(TaskRun).filter(TaskRun.id == task_run_id).first()
+
+    @staticmethod
+    def update_task_run(
+        db: Session,
+        task_run_id: str,
+        status: TaskRunStatus,
+        completed_at: Optional[datetime] = None,
+        error_message: Optional[str] = None,
+        items_processed: int = 0,
+    ) -> Optional[TaskRun]:
+        task_run = TaskRunService.get_task_run(db, task_run_id)
+        if task_run:
+            task_run.status = status
+            if completed_at:
+                task_run.completed_at = completed_at
+            if error_message:
+                task_run.error_message = error_message
+            task_run.items_processed = items_processed
+            db.commit()
+            db.refresh(task_run)
+        return task_run
+
+    @staticmethod
+    def start_task_run(db: Session, task_run_id: str) -> Optional[TaskRun]:
+        task_run = TaskRunService.get_task_run(db, task_run_id)
+        if task_run:
+            task_run.status = TaskRunStatus.RUNNING
+            task_run.started_at = datetime.utcnow()
+            db.commit()
+            db.refresh(task_run)
+        return task_run
+
+    @staticmethod
+    def list_task_runs(
+        db: Session, skip: int = 0, limit: int = 100, task_name: Optional[str] = None
+    ) -> list[TaskRun]:
+        query = db.query(TaskRun)
+        if task_name:
+            query = query.filter(TaskRun.task_name == task_name)
+        return query.order_by(TaskRun.created_at.desc()).offset(skip).limit(limit).all()

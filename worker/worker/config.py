@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import RedisDsn
+from pydantic import PostgresDsn, RedisDsn
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,6 +24,16 @@ class Settings(BaseSettings):
     # Application
     app_name: str = "MTBF Worker"
     environment: str = "development"
+
+    # Database
+    database_url: PostgresDsn = "postgresql://postgres:postgres@postgres:5432/mtbf"
+
+    # KPI Scheduling
+    kpi_rolling_schedule_minute: str = "*"
+    kpi_rolling_schedule_hour: str = "*"
+    kpi_calendar_schedule_minute: str = "0"
+    kpi_calendar_schedule_hour: str = "0"
+    kpi_batch_size: int = 100
 
 
 @lru_cache()

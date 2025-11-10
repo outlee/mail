@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field, validator
 
 
 class UserRole(str, Enum):
@@ -16,6 +16,19 @@ class TaskRunStatus(str, Enum):
     RUNNING = "running"
     SUCCESS = "success"
     FAILED = "failed"
+
+
+class FailureSeverity(str, Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class AuditAction(str, Enum):
+    CREATE = "create"
+    UPDATE = "update"
+    DELETE = "delete"
 
 
 class UserCreate(BaseModel):
@@ -98,3 +111,112 @@ class KPISnapshotResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class AssetRuntimeCreate(BaseModel):
+    asset_id: str
+    runtime_counter: int
+    metadata: Optional[str] = None
+
+    @validator('runtime_counter')
+    def validate_runtime_counter(cls, v):
+        if v < 0:
+            raise ValueError('Runtime counter must be non-negative')
+        return v
+
+
+class AssetRuntimeResponse(BaseModel):
+    id: str
+    asset_id: str
+    runtime_counter: int
+    recorded_at: datetime
+    metadata: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class FailureEventCreate(BaseModel):
+    asset_id: str
+    severity: FailureSeverity
+    start_time: datetime
+    end_time: Optional[datetime] = None
+    description: str
+    metadata: Optional[str] = None
+
+    @validator('end_time')
+    def validate_time_window(cls, v, values):
+        if v and 'start_time' in values and v <= values['start_time']:
+            raise ValueError('End time must be after start time')
+        return v
+
+    @validator('description')
+    def validate_description(cls, v, values):
+        if values.get('severity') in [FailureSeverity.HIGH, FailureSeverity.CRITICAL]:
+            if not v or len(v.strip()) < 10:
+                raise ValueError('High and critical severity events require detailed description (min 10 characters)')
+        return v
+
+
+class FailureEventUpdate(BaseModel):
+    severity: Optional[FailureSeverity] = None
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    description: Optional[str] = None
+    metadata: Optional[str] = None
+
+    @validator('end_time')
+    def validate_time_window(cls, v, values):
+        if v and 'start_time' in values and v <= values['start_time']:
+            raise ValueError('End time must be after start time')
+        return v
+
+
+class FailureEventResponse(BaseModel):
+    id: str
+    asset_id: str
+    severity: FailureSeverity
+    start_time: datetime
+    end_time: Optional[datetime] = None
+    description: str
+    metadata: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AuditLogEntryResponse(BaseModel):
+    id: str
+    user_id: str
+    action: AuditAction
+    resource_type: str
+    resource_id: str
+    old_values: Optional[str] = None
+    new_values: Optional[str] = None
+    timestamp: datetime
+    ip_address: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class DataQualityReportResponse(BaseModel):
+    id: str
+    report_type: str
+    status: str
+    summary: Optional[str] = None
+    details: Optional[str] = None
+    issues_found: int
+    assets_checked: int
+    created_at: datetime
+    completed_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class DataQualityRequest(BaseModel):
+    report_type: str = Field(default="comprehensive", description="Type of data quality check to run")

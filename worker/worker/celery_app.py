@@ -45,6 +45,11 @@ app.conf.beat_schedule = {
         ),
         "args": (None, "all", None),
     },
+    "data-quality-check-daily": {
+        "task": "worker.tasks.data_quality_check_task",
+        "schedule": crontab(minute=0, hour=2),  # Run daily at 2 AM UTC
+        "args": (None, "comprehensive"),
+    },
 }
 
 if __name__ == "__main__":

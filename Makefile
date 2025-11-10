@@ -37,22 +37,31 @@ test:
 	@echo "Running backend tests..."
 	cd backend && python -m pytest
 	@echo "Backend tests completed!"
+	@echo "Running worker tests..."
+	cd worker && python -m pytest
+	@echo "Worker tests completed!"
 
 lint:
 	@echo "Linting backend..."
 	cd backend && ruff check .
+	@echo "Linting worker..."
+	cd worker && ruff check .
 	@echo "Linting frontend..."
 	cd frontend && npm run lint
 
 format:
 	@echo "Formatting backend..."
 	cd backend && black . && isort .
+	@echo "Formatting worker..."
+	cd worker && black . && isort .
 	@echo "Formatting frontend..."
 	cd frontend && npm run format
 
 install:
 	@echo "Installing backend dependencies..."
 	cd backend && pip install -r requirements-dev.txt
+	@echo "Installing worker dependencies..."
+	cd worker && pip install -r requirements-dev.txt
 	@echo "Installing frontend dependencies..."
 	cd frontend && npm install
 	@echo "Dependencies installed!"

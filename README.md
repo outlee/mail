@@ -1,5 +1,7 @@
 # MTBF Platform
 
+[![CI Pipeline](https://github.com/your-username/mtbf-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/your-username/mtbf-platform/actions/workflows/ci.yml)
+
 A modern full-stack platform built with FastAPI, Celery, React, and Docker.
 
 ## 🏗️ Architecture
@@ -266,8 +268,107 @@ pytest --cov=app --cov-report=html
 
 ```bash
 cd frontend
-npm run test  # Add test script when test suite is implemented
+npm run test:e2e  # Run Playwright E2E tests
+npm run test:e2e:debug  # Debug Playwright tests
 ```
+
+### Worker Tests
+
+```bash
+cd worker
+pytest  # Run worker tests with coverage
+```
+
+## 🔄 Continuous Integration
+
+This project uses GitHub Actions for continuous integration. The CI pipeline runs on every push and pull request to the `main` and `develop` branches.
+
+### CI Workflow Jobs
+
+1. **Backend Tests**: Runs linting (ruff, black, isort) and pytest with PostgreSQL and Redis services
+2. **Frontend Tests**: Runs ESLint, TypeScript compilation, and Playwright E2E tests
+3. **Worker Tests**: Runs linting and pytest for Celery worker tasks
+4. **Integration Tests**: Builds and runs the full Docker stack with smoke tests
+
+### Running CI Steps Locally
+
+You can run the same checks locally before pushing:
+
+```bash
+# Run all linting and formatting
+make lint
+make format
+
+# Run all tests
+make test
+
+# Run frontend E2E tests
+cd frontend
+npm install
+npx playwright install
+npm run test:e2e
+
+# Run worker tests
+cd worker
+pytest
+
+# Run full integration test with Docker
+docker compose up --build
+# Wait for services to be healthy, then run smoke tests:
+curl -f http://localhost:8000/health
+curl -f http://localhost:5173
+docker compose exec worker celery -A worker.celery_app inspect ping
+docker compose down -v
+```
+
+### CI Configuration Validation
+
+The project includes a validation script to ensure all CI configuration files are properly set up:
+
+```bash
+./validate-ci.sh
+```
+
+This script checks:
+- Required CI configuration files exist
+- Makefile targets are properly defined
+- Frontend package.json scripts are available
+- Python project configurations are valid
+
+### Local CI Simulation
+
+For quick validation without running the full Docker stack, use the local CI simulation script:
+
+```bash
+./test-ci-local.sh
+```
+
+This script runs linting, formatting checks, and tests for all components locally, providing fast feedback before pushing changes.
+
+### Using `act` for Local CI Testing
+
+For testing the GitHub Actions workflow locally, you can use [act](https://github.com/nektos/act):
+
+```bash
+# Install act (macOS)
+brew install act
+
+# Run the full CI workflow locally
+act
+
+# Run specific job
+act -j backend
+```
+
+### CI Artifacts
+
+The CI pipeline generates the following artifacts:
+
+- **Coverage Reports**: HTML coverage reports for backend, frontend, and worker
+- **Playwright Reports**: Test execution reports and traces for E2E tests
+- **Integration Logs**: Docker compose logs when integration tests fail
+
+These artifacts are available for download from the GitHub Actions run page.
 
 ## 🐛 Troubleshooting
 

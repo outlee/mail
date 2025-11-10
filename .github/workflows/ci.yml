@@ -1,0 +1,279 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '20'
+
+jobs:
+  backend:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: test_mtbf
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ env.PYTHON_VERSION }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        cd backend
+        python -m pip install --upgrade pip
+        pip install -r requirements-dev.txt
+
+    - name: Run linting
+      run: |
+        cd backend
+        ruff check .
+        black --check .
+        isort --check-only .
+
+    - name: Run tests with coverage
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_mtbf
+        REDIS_URL: redis://localhost:6379/0
+        CELERY_BROKER_URL: redis://localhost:6379/0
+        CELERY_RESULT_BACKEND: redis://localhost:6379/0
+        JWT_SECRET: test-secret-key-for-ci
+        ENVIRONMENT: testing
+      run: |
+        cd backend
+        pytest --cov=app --cov-report=xml --cov-report=html -v
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: backend/coverage.xml
+        flags: backend
+        name: backend-coverage
+
+    - name: Upload coverage reports
+      uses: actions/upload-artifact@v3
+      with:
+        name: backend-coverage
+        path: backend/htmlcov/
+
+  frontend:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Node.js ${{ env.NODE_VERSION }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Install dependencies
+      run: |
+        cd frontend
+        npm ci
+
+    - name: Run linting
+      run: |
+        cd frontend
+        npm run lint
+
+    - name: Type check
+      run: |
+        cd frontend
+        npm run build
+
+    - name: Install Playwright browsers
+      run: |
+        cd frontend
+        npx playwright install --with-deps
+
+    - name: Run Playwright tests
+      run: |
+        cd frontend
+        npm run test:e2e
+      env:
+        CI: true
+
+    - name: Upload Playwright report
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: playwright-report
+        path: frontend/playwright-report/
+        retention-days: 7
+
+    - name: Upload Playwright traces
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: playwright-traces
+        path: frontend/test-results/
+        retention-days: 7
+
+  worker:
+    name: Worker Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: test_mtbf
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ env.PYTHON_VERSION }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        cd worker
+        python -m pip install --upgrade pip
+        pip install -r requirements-dev.txt
+
+    - name: Run linting
+      run: |
+        cd worker
+        ruff check .
+        black --check .
+        isort --check-only .
+
+    - name: Run tests with coverage
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_mtbf
+        REDIS_URL: redis://localhost:6379/0
+        CELERY_BROKER_URL: redis://localhost:6379/0
+        CELERY_RESULT_BACKEND: redis://localhost:6379/0
+        ENVIRONMENT: testing
+        KPI_ROLLING_SCHEDULE_MINUTE: "0"
+        KPI_ROLLING_SCHEDULE_HOUR: "0"
+        KPI_CALENDAR_SCHEDULE_MINUTE: "0"
+        KPI_CALENDAR_SCHEDULE_HOUR: "1"
+        KPI_BATCH_SIZE: "10"
+      run: |
+        cd worker
+        pytest --cov=worker --cov-report=xml --cov-report=html -v
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: worker/coverage.xml
+        flags: worker
+        name: worker-coverage
+
+    - name: Upload coverage reports
+      uses: actions/upload-artifact@v3
+      with:
+        name: worker-coverage
+        path: worker/htmlcov/
+
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [backend, frontend, worker]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build and start services
+      run: |
+        docker compose up --build -d
+        timeout 300 bash -c 'until docker compose ps | grep -q "healthy\|Up (healthy)"; do sleep 5; done'
+
+    - name: Wait for services to be ready
+      run: |
+        timeout 60 bash -c 'until curl -f http://localhost:8000/health; do sleep 2; done'
+        timeout 60 bash -c 'until curl -f http://localhost:5173; do sleep 2; done'
+
+    - name: Run smoke tests
+      run: |
+        # Test API health
+        curl -f http://localhost:8000/health
+        
+        # Test frontend is serving
+        curl -f http://localhost:5173
+        
+        # Test worker connectivity
+        docker compose exec -T worker celery -A worker.celery_app inspect ping
+
+    - name: Capture logs
+      if: failure()
+      run: |
+        docker compose logs > docker-compose.log
+
+    - name: Upload logs
+      if: failure()
+      uses: actions/upload-artifact@v3
+      with:
+        name: integration-logs
+        path: docker-compose.log
+        retention-days: 7
+
+    - name: Cleanup
+      if: always()
+      run: |
+        docker compose down -v

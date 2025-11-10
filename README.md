@@ -81,6 +81,57 @@ make install       # Install dependencies locally
   - Pydantic settings management
   - Structured logging
 
+#### CSV Import API
+
+The API exposes CSV ingestion endpoints that validate payloads, persist raw files, and process records via Celery workers.
+
+| Endpoint | HTTP Method | Description | Required Header | Required Columns |
+|----------|-------------|-------------|-----------------|------------------|
+| `/api/v1/imports/assets`   | `POST` | Upload asset definitions | `X-Idempotency-Key` | `external_id`, `name` |
+| `/api/v1/imports/runtime`  | `POST` | Upload runtime counters | `X-Idempotency-Key` | `asset_external_id`, `counter_name`, `value`, `recorded_at` |
+| `/api/v1/imports/failures` | `POST` | Upload failure events | `X-Idempotency-Key` | `asset_external_id`, `failure_code`, `occurred_at` |
+| `/api/v1/imports/{job_id}` | `GET`  | Retrieve job status | Bearer token | _n/a_ |
+
+Key behaviours:
+
+- Files must be uploaded with `Content-Type: text/csv` and are limited to `5 MiB` (configurable via `CSV_IMPORT_MAX_BYTES`).
+- Requests without `X-Idempotency-Key` or with duplicate keys inside the TTL window (`CSV_IMPORT_IDEMPOTENCY_TTL_MINUTES`, default 60 minutes) return the previously created job without re-processing.
+- Successful uploads create a `csv_import_jobs` record and enqueue `worker.tasks.process_csv_import_task` for background processing.
+- Job status responses include total, processed, skipped, and errored row counts plus a sample of row-level validation errors.
+
+Sample payloads:
+
+<details>
+<summary>Assets CSV</summary>
+
+```csv
+external_id,name,description
+asset-001,Main Generator,Primary power supply
+asset-002,Backup Generator,Secondary power supply
+```
+</details>
+
+<details>
+<summary>Runtime Counters CSV</summary>
+
+```csv
+asset_external_id,counter_name,value,recorded_at
+asset-001,uptime_hours,121.5,2023-10-01T00:00:00Z
+asset-001,start_count,4,2023-10-01T12:00:00Z
+```
+</details>
+
+<details>
+<summary>Failure Events CSV</summary>
+
+```csv
+asset_external_id,failure_code,occurred_at,description,resolved_at
+asset-001,FAIL-001,2023-10-01T02:15:00Z,Unexpected shutdown,2023-10-01T03:00:00Z
+```
+</details>
+
+Use `GET /api/v1/imports/{job_id}` to poll progress. Completed jobs with partial failures surface a non-empty `error_sample` array and descriptive message while still committing valid rows.
+
 ### Worker Service
 
 - **Technology**: Celery

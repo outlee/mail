@@ -2,9 +2,12 @@
 from app.database import Base, engine
 from app.models import (
     Asset,
+    CSVImportJob,
+    FailureEvent,
     Group,
     KPISnapshot,
     RefreshToken,
+    RuntimeCounter,
     TaskRun,
     User,
 )

@@ -46,6 +46,8 @@ env/
 htmlcov/
 .tox/
 .hypothesis/
+reports/
+*.xml
 
 # Node
 node_modules/

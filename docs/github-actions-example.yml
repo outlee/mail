@@ -1,0 +1,245 @@
+# Sample GitHub Actions workflow for MTBF Platform testing
+# 
+# To use this workflow:
+# 1. Create .github/workflows/ directory in your repository
+# 2. Copy this file to .github/workflows/tests.yml
+# 3. Commit and push to trigger the workflow
+
+name: Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+jobs:
+  backend-tests:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: mtbf_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements-dev.txt
+      
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      
+      - name: Run linter
+        run: |
+          cd backend
+          ruff check .
+      
+      - name: Run formatter check
+        run: |
+          cd backend
+          black --check .
+          isort --check-only .
+      
+      - name: Run tests with coverage
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mtbf_test
+        run: |
+          cd backend
+          pytest --cov=app --cov-report=xml --cov-report=html --junitxml=../reports/junit/backend-results.xml
+      
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./backend/coverage.xml
+          flags: backend
+          name: backend-coverage
+      
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: backend-test-results
+          path: |
+            reports/junit/backend-results.xml
+            reports/coverage/backend/
+      
+      - name: Check coverage threshold
+        run: |
+          cd backend
+          coverage report --fail-under=80
+
+  frontend-e2e-tests:
+    name: Frontend E2E Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      
+      - name: Set up Python (for backend API)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+      
+      - name: Start PostgreSQL
+        run: |
+          sudo systemctl start postgresql.service
+          sudo -u postgres psql -c "CREATE DATABASE mtbf;"
+          sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';"
+      
+      - name: Install backend dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+      
+      - name: Start backend API
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mtbf
+        run: |
+          cd backend
+          uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+          sleep 5
+      
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          npm ci
+      
+      - name: Install Playwright browsers
+        run: |
+          cd frontend
+          npx playwright install --with-deps chromium
+      
+      - name: Run linter
+        run: |
+          cd frontend
+          npm run lint
+      
+      - name: Run E2E tests
+        env:
+          VITE_API_URL: http://localhost:8000
+        run: |
+          cd frontend
+          npm run test:e2e
+      
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: playwright-report
+          path: reports/playwright/
+          retention-days: 30
+      
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: e2e-test-results
+          path: reports/junit/e2e-results.xml
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [backend-tests]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Build Docker images
+        run: |
+          docker compose build
+      
+      - name: Start services
+        run: |
+          docker compose up -d
+          sleep 10
+      
+      - name: Check service health
+        run: |
+          curl --retry 10 --retry-delay 5 --retry-connrefused http://localhost:8000/health
+      
+      - name: Run integration tests
+        run: |
+          docker compose exec -T api pytest tests/ --tb=short
+      
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          docker compose logs
+      
+      - name: Cleanup
+        if: always()
+        run: |
+          docker compose down -v
+
+  test-summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-e2e-tests]
+    if: always()
+    
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+      
+      - name: Display test summary
+        run: |
+          echo "## Test Results Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Backend Tests" >> $GITHUB_STEP_SUMMARY
+          if [ -f backend-test-results/backend-results.xml ]; then
+            echo "✅ Backend tests completed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Backend tests failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### E2E Tests" >> $GITHUB_STEP_SUMMARY
+          if [ -f e2e-test-results/e2e-results.xml ]; then
+            echo "✅ E2E tests completed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ E2E tests failed" >> $GITHUB_STEP_SUMMARY
+          fi

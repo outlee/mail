@@ -2,6 +2,10 @@
 from app.database import Base, engine
 from app.models import (
     Asset,
+    AssetRuntime,
+    AuditLogEntry,
+    DataQualityReport,
+    FailureEvent,
     Group,
     KPISnapshot,
     RefreshToken,

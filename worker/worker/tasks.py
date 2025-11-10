@@ -1,5 +1,6 @@
 import logging
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -14,6 +15,7 @@ from worker.database import SessionLocal
 from app.models import TaskRunStatus
 from app.services import (
     AssetService,
+    DataQualityService,
     GroupService,
     KPIService,
     TaskRunService,
@@ -187,6 +189,106 @@ def recompute_calendar_kpis_task(
 
     except Exception as e:
         logger.error(f"Error in calendar KPI recomputation: {e}", exc_info=True)
+
+        if task_run_id:
+            try:
+                TaskRunService.update_task_run(
+                    db=db,
+                    task_run_id=task_run_id,
+                    status=TaskRunStatus.FAILED,
+                    completed_at=datetime.utcnow(),
+                    error_message=str(e),
+                )
+            except Exception as update_error:
+                logger.error(f"Failed to update task run on error: {update_error}")
+
+        raise self.retry(exc=e)
+
+    finally:
+        db.close()
+
+
+@app.task(
+    name="worker.tasks.data_quality_check_task",
+    bind=True,
+    retry_kwargs={"max_retries": 3},
+    default_retry_delay=10,
+)
+def data_quality_check_task(
+    self,
+    task_run_id: Optional[str],
+    report_type: str = "comprehensive",
+):
+    db = SessionLocal()
+    task_run = None
+    start_time = time.time()
+
+    try:
+        logger.info(
+            f"Starting data quality check task: "
+            f"task_run_id={task_run_id}, report_type={report_type}"
+        )
+
+        if task_run_id:
+            task_run = TaskRunService.get_task_run(db, task_run_id)
+            if task_run:
+                TaskRunService.start_task_run(db, task_run_id)
+
+        # Run data quality check
+        report = DataQualityService.run_data_quality_check(db, report_type)
+        
+        items_processed = 1  # One report generated
+        duration = time.time() - start_time
+
+        # Record metrics (if available)
+        try:
+            from app.metrics import record_task_execution
+            record_task_execution(
+                task_name="data_quality_check",
+                status="success",
+                duration=duration
+            )
+        except ImportError:
+            # Metrics not available in worker environment
+            pass
+
+        if task_run_id:
+            TaskRunService.update_task_run(
+                db=db,
+                task_run_id=task_run_id,
+                status=TaskRunStatus.SUCCESS,
+                completed_at=datetime.utcnow(),
+                items_processed=items_processed,
+            )
+
+        logger.info(
+            f"Data quality check completed: "
+            f"report_id={report.id}, issues_found={report.issues_found}"
+        )
+
+        return {
+            "status": "success",
+            "report_id": report.id,
+            "issues_found": report.issues_found,
+            "assets_checked": report.assets_checked,
+        }
+
+    except Exception as e:
+        duration = time.time() - start_time
+        logger.error(f"Error in data quality check: {e}", exc_info=True)
+
+        # Record failure metrics
+        try:
+            from app.metrics import record_task_execution
+            record_task_execution(
+                task_name="data_quality_check",
+                status="failed",
+                duration=duration,
+                error_type=type(e).__name__
+            )
+        except ImportError:
+            # Metrics not available in worker environment
+            pass
 
         if task_run_id:
             try:

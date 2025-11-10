@@ -46,6 +46,9 @@ docker compose up --build
 - **Backend API**: http://localhost:8000
 - **API Documentation**: http://localhost:8000/docs
 - **Health Check**: http://localhost:8000/health
+- **Prometheus Metrics**: http://localhost:8000/metrics
+- **Prometheus UI**: http://localhost:9090
+- **Grafana Dashboard**: http://localhost:3000 (admin/admin)
 
 ### Using Make Commands
 
@@ -245,6 +248,8 @@ All configuration is managed through environment variables. Copy `.env.example` 
 | Backend    | 8000 | FastAPI application            |
 | PostgreSQL | 5432 | Database server                |
 | Redis      | 6379 | Cache and message broker       |
+| Prometheus  | 9090 | Metrics collection            |
+| Grafana    | 3000 | Visualization dashboard       |
 
 ## 🧪 Testing
 
@@ -382,6 +387,29 @@ npm run test  # Add test script when test suite is implemented
 ├── .env.example          # Environment template
 └── README.md             # This file
 ```
+
+## 🛡️ Data Governance
+
+The platform includes comprehensive data governance features:
+
+### Key Features
+- **Data Quality Validations**: Monotonic runtime counters, non-overlapping failure windows
+- **Audit Logging**: Complete audit trail with before/after snapshots
+- **Observability**: Prometheus metrics and OpenTelemetry tracing
+- **Automated Checks**: Daily data quality validation tasks
+
+### API Endpoints
+- **Asset Runtime**: `/api/v1/asset-runtimes/` - Manage runtime data
+- **Failure Events**: `/api/v1/failure-events/` - Track failure events  
+- **Audit Logs**: `/api/v1/audit/` - View audit history
+- **Data Quality**: `/api/v1/data-quality/` - Run quality checks
+
+### Monitoring
+- **Metrics**: Available at `/metrics` endpoint
+- **Prometheus**: http://localhost:9090 - Metrics collection
+- **Grafana**: http://localhost:3000 (admin/admin) - Dashboards
+
+For detailed documentation, see [DATA_GOVERNANCE.md](./DATA_GOVERNANCE.md)
 
 ## 🔐 Security Notes
 

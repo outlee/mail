@@ -5,9 +5,16 @@ from typing import Optional
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from opentelemetry import trace
 
 from app.models import (
     Asset,
+    AssetRuntime,
+    AuditAction,
+    AuditLogEntry,
+    DataQualityReport,
+    FailureEvent,
+    FailureSeverity,
     Group,
     KPISnapshot,
     RefreshToken,
@@ -330,3 +337,337 @@ class TaskRunService:
         if task_name:
             query = query.filter(TaskRun.task_name == task_name)
         return query.order_by(TaskRun.created_at.desc()).offset(skip).limit(limit).all()
+
+
+class AssetRuntimeService:
+    @staticmethod
+    def create_asset_runtime(
+        db: Session,
+        asset_id: str,
+        runtime_counter: int,
+        metadata: Optional[str] = None,
+    ) -> AssetRuntime:
+        tracer = trace.get_tracer(__name__)
+        with tracer.start_as_current_span("create_asset_runtime") as span:
+            span.set_attribute("asset_id", asset_id)
+            span.set_attribute("runtime_counter", runtime_counter)
+            
+            # Validate monotonic runtime counter
+            last_runtime = (
+                db.query(AssetRuntime)
+                .filter(AssetRuntime.asset_id == asset_id)
+                .order_by(AssetRuntime.runtime_counter.desc())
+                .first()
+            )
+            
+            if last_runtime and runtime_counter <= last_runtime.runtime_counter:
+                span.set_attribute("validation_failed", True)
+                span.set_attribute("last_counter", last_runtime.runtime_counter)
+                raise ValueError(
+                    f"Runtime counter must be greater than last recorded value ({last_runtime.runtime_counter})"
+                )
+            
+            runtime_id = str(uuid.uuid4())
+            db_runtime = AssetRuntime(
+                id=runtime_id,
+                asset_id=asset_id,
+                runtime_counter=runtime_counter,
+                metadata=metadata,
+            )
+            db.add(db_runtime)
+            db.commit()
+            db.refresh(db_runtime)
+            
+            span.set_attribute("runtime_id", runtime_id)
+            return db_runtime
+
+    @staticmethod
+    def get_asset_runtime_by_id(db: Session, runtime_id: str) -> Optional[AssetRuntime]:
+        return db.query(AssetRuntime).filter(AssetRuntime.id == runtime_id).first()
+
+    @staticmethod
+    def list_asset_runtimes(
+        db: Session, asset_id: str, skip: int = 0, limit: int = 100
+    ) -> list[AssetRuntime]:
+        return (
+            db.query(AssetRuntime)
+            .filter(AssetRuntime.asset_id == asset_id)
+            .order_by(AssetRuntime.runtime_counter.desc())
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+
+
+class FailureEventService:
+    @staticmethod
+    def create_failure_event(
+        db: Session,
+        asset_id: str,
+        severity: FailureSeverity,
+        start_time: datetime,
+        description: str,
+        end_time: Optional[datetime] = None,
+        metadata: Optional[str] = None,
+    ) -> FailureEvent:
+        tracer = trace.get_tracer(__name__)
+        with tracer.start_as_current_span("create_failure_event") as span:
+            span.set_attribute("asset_id", asset_id)
+            span.set_attribute("severity", severity.value)
+            span.set_attribute("start_time", start_time.isoformat())
+            if end_time:
+                span.set_attribute("end_time", end_time.isoformat())
+            
+            # Check for overlapping failure events
+            overlapping_events = (
+                db.query(FailureEvent)
+                .filter(
+                    FailureEvent.asset_id == asset_id,
+                    FailureEvent.start_time <= end_time if end_time else True,
+                    FailureEvent.end_time >= start_time if start_time else True,
+                )
+                .all()
+            )
+            
+            span.set_attribute("existing_events_checked", len(overlapping_events))
+            
+            for event in overlapping_events:
+                if (
+                    (event.start_time <= start_time <= event.end_time)
+                    or (event.start_time <= end_time <= event.end_time)
+                    or (start_time <= event.start_time and end_time >= event.end_time)
+                ):
+                    span.set_attribute("validation_failed", True)
+                    span.set_attribute("overlapping_event_id", event.id)
+                    raise ValueError(
+                        f"Failure event overlaps with existing event {event.id} "
+                        f"({event.start_time} to {event.end_time})"
+                    )
+            
+            event_id = str(uuid.uuid4())
+            db_event = FailureEvent(
+                id=event_id,
+                asset_id=asset_id,
+                severity=severity,
+                start_time=start_time,
+                end_time=end_time,
+                description=description,
+                metadata=metadata,
+            )
+            db.add(db_event)
+            db.commit()
+            db.refresh(db_event)
+            
+            span.set_attribute("event_id", event_id)
+            return db_event
+
+    @staticmethod
+    def get_failure_event_by_id(db: Session, event_id: str) -> Optional[FailureEvent]:
+        return db.query(FailureEvent).filter(FailureEvent.id == event_id).first()
+
+    @staticmethod
+    def update_failure_event(
+        db: Session, event_id: str, **kwargs
+    ) -> Optional[FailureEvent]:
+        event = FailureEventService.get_failure_event_by_id(db, event_id)
+        if event:
+            for key, value in kwargs.items():
+                if hasattr(event, key) and value is not None:
+                    setattr(event, key, value)
+            db.commit()
+            db.refresh(event)
+        return event
+
+    @staticmethod
+    def delete_failure_event(db: Session, event_id: str) -> bool:
+        event = FailureEventService.get_failure_event_by_id(db, event_id)
+        if event:
+            db.delete(event)
+            db.commit()
+            return True
+        return False
+
+    @staticmethod
+    def list_failure_events(
+        db: Session, asset_id: Optional[str] = None, skip: int = 0, limit: int = 100
+    ) -> list[FailureEvent]:
+        query = db.query(FailureEvent)
+        if asset_id:
+            query = query.filter(FailureEvent.asset_id == asset_id)
+        return query.order_by(FailureEvent.start_time.desc()).offset(skip).limit(limit).all()
+
+
+class AuditLogService:
+    @staticmethod
+    def create_audit_entry(
+        db: Session,
+        user_id: str,
+        action: AuditAction,
+        resource_type: str,
+        resource_id: str,
+        old_values: Optional[str] = None,
+        new_values: Optional[str] = None,
+        ip_address: Optional[str] = None,
+    ) -> AuditLogEntry:
+        entry_id = str(uuid.uuid4())
+        db_entry = AuditLogEntry(
+            id=entry_id,
+            user_id=user_id,
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            old_values=old_values,
+            new_values=new_values,
+            ip_address=ip_address,
+        )
+        db.add(db_entry)
+        db.commit()
+        db.refresh(db_entry)
+        return db_entry
+
+    @staticmethod
+    def list_audit_entries(
+        db: Session,
+        resource_type: Optional[str] = None,
+        resource_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[AuditLogEntry]:
+        query = db.query(AuditLogEntry)
+        if resource_type:
+            query = query.filter(AuditLogEntry.resource_type == resource_type)
+        if resource_id:
+            query = query.filter(AuditLogEntry.resource_id == resource_id)
+        if user_id:
+            query = query.filter(AuditLogEntry.user_id == user_id)
+        return query.order_by(AuditLogEntry.timestamp.desc()).offset(skip).limit(limit).all()
+
+
+class DataQualityService:
+    @staticmethod
+    def create_data_quality_report(
+        db: Session,
+        report_type: str,
+        status: str = "pending",
+    ) -> DataQualityReport:
+        report_id = str(uuid.uuid4())
+        db_report = DataQualityReport(
+            id=report_id,
+            report_type=report_type,
+            status=status,
+        )
+        db.add(db_report)
+        db.commit()
+        db.refresh(db_report)
+        return db_report
+
+    @staticmethod
+    def update_data_quality_report(
+        db: Session, report_id: str, **kwargs
+    ) -> Optional[DataQualityReport]:
+        report = db.query(DataQualityReport).filter(DataQualityReport.id == report_id).first()
+        if report:
+            for key, value in kwargs.items():
+                if hasattr(report, key) and value is not None:
+                    setattr(report, key, value)
+            db.commit()
+            db.refresh(report)
+        return report
+
+    @staticmethod
+    def get_data_quality_report_by_id(db: Session, report_id: str) -> Optional[DataQualityReport]:
+        return db.query(DataQualityReport).filter(DataQualityReport.id == report_id).first()
+
+    @staticmethod
+    def list_data_quality_reports(
+        db: Session, skip: int = 0, limit: int = 100
+    ) -> list[DataQualityReport]:
+        return (
+            db.query(DataQualityReport)
+            .order_by(DataQualityReport.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+
+    @staticmethod
+    def run_data_quality_check(db: Session, report_type: str = "comprehensive") -> DataQualityReport:
+        """Run data quality validation checks."""
+        report = DataQualityService.create_data_quality_report(db, report_type, "running")
+        
+        issues = []
+        assets_checked = 0
+        
+        try:
+            # Check 1: Assets without runtime entries
+            assets_without_runtime = (
+                db.query(Asset)
+                .outerjoin(AssetRuntime)
+                .filter(AssetRuntime.id.is_(None))
+                .all()
+            )
+            
+            for asset in assets_without_runtime:
+                issues.append(f"Asset {asset.id} ({asset.name}) has no runtime entries")
+            
+            # Check 2: Failure events with invalid time windows
+            invalid_failure_events = (
+                db.query(FailureEvent)
+                .filter(
+                    FailureEvent.end_time.isnot(None),
+                    FailureEvent.end_time <= FailureEvent.start_time
+                )
+                .all()
+            )
+            
+            for event in invalid_failure_events:
+                issues.append(f"Failure event {event.id} has invalid time window")
+            
+            # Check 3: Assets with decreasing runtime counters
+            assets_with_decreasing_runtime = []
+            all_assets = db.query(Asset).all()
+            
+            for asset in all_assets:
+                runtimes = (
+                    db.query(AssetRuntime)
+                    .filter(AssetRuntime.asset_id == asset.id)
+                    .order_by(AssetRuntime.recorded_at.asc())
+                    .all()
+                )
+                
+                for i in range(1, len(runtimes)):
+                    if runtimes[i].runtime_counter < runtimes[i-1].runtime_counter:
+                        assets_with_decreasing_runtime.append(asset.id)
+                        break
+            
+            for asset_id in assets_with_decreasing_runtime:
+                issues.append(f"Asset {asset_id} has decreasing runtime counters")
+            
+            assets_checked = len(all_assets)
+            
+            # Update report with results
+            DataQualityService.update_data_quality_report(
+                db,
+                report.id,
+                status="completed",
+                summary=f"Found {len(issues)} issues across {assets_checked} assets",
+                details="\n".join(issues) if issues else "No issues found",
+                issues_found=len(issues),
+                assets_checked=assets_checked,
+                completed_at=datetime.utcnow(),
+            )
+            
+            logger.info(f"Data quality check completed: {len(issues)} issues found")
+            
+        except Exception as e:
+            logger.error(f"Data quality check failed: {e}")
+            DataQualityService.update_data_quality_report(
+                db,
+                report.id,
+                status="failed",
+                summary=f"Data quality check failed: {str(e)}",
+                completed_at=datetime.utcnow(),
+            )
+        
+        return DataQualityService.get_data_quality_report_by_id(db, report.id)

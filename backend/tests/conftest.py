@@ -7,7 +7,10 @@ from fastapi.testclient import TestClient
 
 from app.database import Base
 from app.main import app
-from app.models import Asset, Group, KPISnapshot, TaskRun, TaskRunStatus, User, UserRole
+from app.models.asset import Asset, Group
+from app.models.auth import User, UserRole
+from app.models.kpi import KPISnapshot
+from app.models.monitoring import TaskRun, TaskRunStatus
 from app.security import hash_password
 
 DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/mtbf_test"

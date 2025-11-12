@@ -27,7 +27,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app.models import Asset, Group, KPISnapshot, TaskRun, TaskRunStatus, User, UserRole
+from app.models.asset import Asset, Group
+from app.models.auth import User, UserRole
+from app.models.kpi import KPISnapshot
+from app.models.monitoring import TaskRun, TaskRunStatus
 from app.security import hash_password
 
 

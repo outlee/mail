@@ -1,5 +1,10 @@
 # MTBF Platform
 
+<<<<<<< HEAD
+=======
+[![CI Pipeline](https://github.com/your-username/mtbf-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/your-username/mtbf-platform/actions/workflows/ci.yml)
+
+>>>>>>> origin/main
 A modern full-stack platform built with FastAPI, Celery, React, and Docker.
 
 ## 🏗️ Architecture
@@ -79,6 +84,60 @@ make install       # Install dependencies locally
   - Pydantic settings management
   - Structured logging
 
+<<<<<<< HEAD
+=======
+#### CSV Import API
+
+The API exposes CSV ingestion endpoints that validate payloads, persist raw files, and process records via Celery workers.
+
+| Endpoint | HTTP Method | Description | Required Header | Required Columns |
+|----------|-------------|-------------|-----------------|------------------|
+| `/api/v1/imports/assets`   | `POST` | Upload asset definitions | `X-Idempotency-Key` | `external_id`, `name` |
+| `/api/v1/imports/runtime`  | `POST` | Upload runtime counters | `X-Idempotency-Key` | `asset_external_id`, `counter_name`, `value`, `recorded_at` |
+| `/api/v1/imports/failures` | `POST` | Upload failure events | `X-Idempotency-Key` | `asset_external_id`, `failure_code`, `occurred_at` |
+| `/api/v1/imports/{job_id}` | `GET`  | Retrieve job status | Bearer token | _n/a_ |
+
+Key behaviours:
+
+- Files must be uploaded with `Content-Type: text/csv` and are limited to `5 MiB` (configurable via `CSV_IMPORT_MAX_BYTES`).
+- Requests without `X-Idempotency-Key` or with duplicate keys inside the TTL window (`CSV_IMPORT_IDEMPOTENCY_TTL_MINUTES`, default 60 minutes) return the previously created job without re-processing.
+- Successful uploads create a `csv_import_jobs` record and enqueue `worker.tasks.process_csv_import_task` for background processing.
+- Job status responses include total, processed, skipped, and errored row counts plus a sample of row-level validation errors.
+
+Sample payloads:
+
+<details>
+<summary>Assets CSV</summary>
+
+```csv
+external_id,name,description
+asset-001,Main Generator,Primary power supply
+asset-002,Backup Generator,Secondary power supply
+```
+</details>
+
+<details>
+<summary>Runtime Counters CSV</summary>
+
+```csv
+asset_external_id,counter_name,value,recorded_at
+asset-001,uptime_hours,121.5,2023-10-01T00:00:00Z
+asset-001,start_count,4,2023-10-01T12:00:00Z
+```
+</details>
+
+<details>
+<summary>Failure Events CSV</summary>
+
+```csv
+asset_external_id,failure_code,occurred_at,description,resolved_at
+asset-001,FAIL-001,2023-10-01T02:15:00Z,Unexpected shutdown,2023-10-01T03:00:00Z
+```
+</details>
+
+Use `GET /api/v1/imports/{job_id}` to poll progress. Completed jobs with partial failures surface a non-empty `error_sample` array and descriptive message while still committing valid rows.
+
+>>>>>>> origin/main
 ### Worker Service
 
 - **Technology**: Celery
@@ -248,6 +307,7 @@ All configuration is managed through environment variables. Copy `.env.example` 
 
 ## 🧪 Testing
 
+<<<<<<< HEAD
 The MTBF Platform includes comprehensive automated testing with pytest (backend) and Playwright (frontend E2E).
 
 ### Quick Start
@@ -336,6 +396,127 @@ python scripts/seed_demo.py
 - Manager: `manager@mtbf.local` / `manager123`
 
 For detailed testing documentation, see [TESTING.md](TESTING.md).
+=======
+### Backend Tests
+
+```bash
+# Run all tests
+make test
+
+# Run specific test file
+cd backend
+pytest tests/test_health.py
+
+# Run with coverage
+pytest --cov=app --cov-report=html
+```
+
+### Frontend Tests
+
+```bash
+cd frontend
+npm run test:e2e  # Run Playwright E2E tests
+npm run test:e2e:debug  # Debug Playwright tests
+```
+
+### Worker Tests
+
+```bash
+cd worker
+pytest  # Run worker tests with coverage
+```
+
+## 🔄 Continuous Integration
+
+This project uses GitHub Actions for continuous integration. The CI pipeline runs on every push and pull request to the `main` and `develop` branches.
+
+### CI Workflow Jobs
+
+1. **Backend Tests**: Runs linting (ruff, black, isort) and pytest with PostgreSQL and Redis services
+2. **Frontend Tests**: Runs ESLint, TypeScript compilation, and Playwright E2E tests
+3. **Worker Tests**: Runs linting and pytest for Celery worker tasks
+4. **Integration Tests**: Builds and runs the full Docker stack with smoke tests
+
+### Running CI Steps Locally
+
+You can run the same checks locally before pushing:
+
+```bash
+# Run all linting and formatting
+make lint
+make format
+
+# Run all tests
+make test
+
+# Run frontend E2E tests
+cd frontend
+npm install
+npx playwright install
+npm run test:e2e
+
+# Run worker tests
+cd worker
+pytest
+
+# Run full integration test with Docker
+docker compose up --build
+# Wait for services to be healthy, then run smoke tests:
+curl -f http://localhost:8000/health
+curl -f http://localhost:5173
+docker compose exec worker celery -A worker.celery_app inspect ping
+docker compose down -v
+```
+
+### CI Configuration Validation
+
+The project includes a validation script to ensure all CI configuration files are properly set up:
+
+```bash
+./validate-ci.sh
+```
+
+This script checks:
+- Required CI configuration files exist
+- Makefile targets are properly defined
+- Frontend package.json scripts are available
+- Python project configurations are valid
+
+### Local CI Simulation
+
+For quick validation without running the full Docker stack, use the local CI simulation script:
+
+```bash
+./test-ci-local.sh
+```
+
+This script runs linting, formatting checks, and tests for all components locally, providing fast feedback before pushing changes.
+
+### Using `act` for Local CI Testing
+
+For testing the GitHub Actions workflow locally, you can use [act](https://github.com/nektos/act):
+
+```bash
+# Install act (macOS)
+brew install act
+
+# Run the full CI workflow locally
+act
+
+# Run specific job
+act -j backend
+```
+
+### CI Artifacts
+
+The CI pipeline generates the following artifacts:
+
+- **Coverage Reports**: HTML coverage reports for backend, frontend, and worker
+- **Playwright Reports**: Test execution reports and traces for E2E tests
+- **Integration Logs**: Docker compose logs when integration tests fail
+
+These artifacts are available for download from the GitHub Actions run page.
+>>>>>>> origin/main
 
 ## 🐛 Troubleshooting
 

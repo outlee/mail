@@ -40,6 +40,9 @@ test:
     @echo "Running backend tests..."
     cd backend && python -m pytest
     @echo "Backend tests completed!"
+    @echo "Running worker tests..."
+    cd worker && python -m pytest
+    @echo "Worker tests completed!"
 
 test-e2e:
     @echo "Running frontend E2E tests..."

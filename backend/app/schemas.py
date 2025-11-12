@@ -1,21 +1,9 @@
 from datetime import datetime
-from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, EmailStr
 
-
-class UserRole(str, Enum):
-    MAINTAINER = "maintainer"
-    OPERATOR = "operator"
-    MANAGER = "manager"
-
-
-class TaskRunStatus(str, Enum):
-    PENDING = "pending"
-    RUNNING = "running"
-    SUCCESS = "success"
-    FAILED = "failed"
+from app.models import CSVImportStatus, CSVImportType, TaskRunStatus, UserRole
 
 
 class UserCreate(BaseModel):
@@ -95,6 +83,28 @@ class KPISnapshotResponse(BaseModel):
     period_start: datetime
     period_end: datetime
     created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class CSVImportJobResponse(BaseModel):
+    id: str
+    import_type: CSVImportType
+    idempotency_key: str
+    status: CSVImportStatus
+    actor_id: Optional[str] = None
+    source_filename: Optional[str] = None
+    total_rows: int
+    processed_rows: int
+    skipped_rows: int
+    error_rows: int
+    error_sample: list[dict[str, Any]]
+    message: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

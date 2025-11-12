@@ -1,16 +1,27 @@
+import uuid
 from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any
 
 from celery import current_app as celery_app
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Header,
+    HTTPException,
+    UploadFile,
+    status,
+)
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import get_db
 from app.dependencies import get_current_user, require_role
-from app.models import UserRole
+from app.models import CSVImportType, UserRole
 from app.schemas import (
+    CSVImportJobResponse,
     KPIRecomputeRequest,
-    KPISnapshotResponse,
     MeResponse,
     RefreshTokenRequest,
     TaskRunResponse,
@@ -26,19 +37,164 @@ from app.security import (
     hash_password,
 )
 from app.services import (
+    CSVImportJobService,
     KPIService,
     RefreshTokenService,
     TaskRunService,
     UserService,
 )
 
+settings = get_settings()
+
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
 kpi_router = APIRouter(prefix="/kpis", tags=["kpis"])
-settings = get_settings()
+imports_router = APIRouter(prefix="/imports", tags=["imports"])
 
 router = APIRouter(prefix="/api/v1")
 router.include_router(auth_router)
 router.include_router(kpi_router)
+router.include_router(imports_router)
+
+ACCEPTED_CSV_CONTENT_TYPES = {
+    "text/csv",
+    "application/csv",
+    "application/vnd.ms-excel",
+}
+
+
+def _build_import_job_response(job) -> CSVImportJobResponse:
+    payload: dict[str, Any] = {
+        "id": job.id,
+        "import_type": job.import_type,
+        "idempotency_key": job.idempotency_key,
+        "status": job.status,
+        "actor_id": job.actor_id,
+        "source_filename": job.source_filename,
+        "total_rows": job.total_rows or 0,
+        "processed_rows": job.processed_rows or 0,
+        "skipped_rows": job.skipped_rows or 0,
+        "error_rows": job.error_rows or 0,
+        "error_sample": job.error_sample or [],
+        "message": job.message,
+        "created_at": job.created_at,
+        "updated_at": job.updated_at,
+        "started_at": job.started_at,
+        "completed_at": job.completed_at,
+    }
+    return CSVImportJobResponse.model_validate(payload)
+
+
+async def _handle_csv_import(
+    import_type: CSVImportType,
+    upload: UploadFile,
+    idempotency_key: str,
+    current_user,
+    db: Session,
+) -> CSVImportJobResponse:
+    if not idempotency_key or not idempotency_key.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="X-Idempotency-Key header is required",
+        )
+
+    idempotency_key = idempotency_key.strip()
+
+    existing_job = CSVImportJobService.get_by_idempotency(
+        db=db, import_type=import_type, idempotency_key=idempotency_key
+    )
+    if existing_job and CSVImportJobService.is_within_ttl(
+        existing_job, settings.csv_import_idempotency_ttl_minutes
+    ):
+        await upload.close()
+        return _build_import_job_response(existing_job)
+
+    if upload.content_type not in ACCEPTED_CSV_CONTENT_TYPES:
+        await upload.close()
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Unsupported content type. Expected text/csv.",
+        )
+
+    contents = await upload.read()
+    source_filename = upload.filename
+    await upload.close()
+
+    if not contents:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="CSV file is empty",
+        )
+
+    if len(contents) > settings.csv_import_max_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="CSV file exceeds maximum allowed size",
+        )
+
+    storage_dir = Path(settings.csv_import_storage_path).expanduser().resolve()
+    storage_dir.mkdir(parents=True, exist_ok=True)
+
+    job_id = str(uuid.uuid4())
+    destination = storage_dir / f"{job_id}.csv"
+
+    try:
+        with destination.open("wb") as buffer:
+            buffer.write(contents)
+    except OSError as exc:
+        if destination.exists():
+            destination.unlink()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to persist uploaded CSV file",
+        ) from exc
+
+    try:
+        job = CSVImportJobService.create_job(
+            db=db,
+            import_type=import_type,
+            idempotency_key=idempotency_key,
+            storage_path=str(destination),
+            actor_id=getattr(current_user, "id", None),
+            source_filename=source_filename,
+            job_id=job_id,
+        )
+    except Exception as exc:
+        if destination.exists():
+            destination.unlink()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create import job",
+        ) from exc
+
+    try:
+        celery_app.send_task(
+            "worker.tasks.process_csv_import_task",
+            args=(job.id,),
+            retry=True,
+            retry_policy={
+                "max_retries": 3,
+                "interval_start": 1,
+                "interval_step": 2,
+                "interval_max": 10,
+            },
+        )
+    except Exception as exc:
+        CSVImportJobService.mark_failed(
+            db=db,
+            job_id=job.id,
+            total_rows=0,
+            processed_rows=0,
+            skipped_rows=0,
+            error_rows=0,
+            error_sample=[],
+            message=f"Failed to enqueue job: {exc}",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to enqueue import job",
+        ) from exc
+
+    return _build_import_job_response(job)
 
 
 @auth_router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -298,3 +454,76 @@ async def get_task_run_status(
         items_processed=task_run.items_processed,
         created_at=task_run.created_at,
     )
+
+
+@imports_router.post(
+    "/assets",
+    response_model=CSVImportJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def import_assets_csv(
+    file: UploadFile = File(...),
+    idempotency_key: str = Header(
+        ..., alias="X-Idempotency-Key", convert_underscores=False
+    ),
+    db: Session = Depends(get_db),
+    current_user = Depends(require_role([UserRole.MAINTAINER, UserRole.OPERATOR])),
+):
+    return await _handle_csv_import(
+        CSVImportType.ASSETS, file, idempotency_key, current_user, db
+    )
+
+
+@imports_router.post(
+    "/runtime",
+    response_model=CSVImportJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def import_runtime_counters_csv(
+    file: UploadFile = File(...),
+    idempotency_key: str = Header(
+        ..., alias="X-Idempotency-Key", convert_underscores=False
+    ),
+    db: Session = Depends(get_db),
+    current_user = Depends(require_role([UserRole.MAINTAINER, UserRole.OPERATOR])),
+):
+    return await _handle_csv_import(
+        CSVImportType.RUNTIME, file, idempotency_key, current_user, db
+    )
+
+
+@imports_router.post(
+    "/failures",
+    response_model=CSVImportJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def import_failure_events_csv(
+    file: UploadFile = File(...),
+    idempotency_key: str = Header(
+        ..., alias="X-Idempotency-Key", convert_underscores=False
+    ),
+    db: Session = Depends(get_db),
+    current_user = Depends(require_role([UserRole.MAINTAINER, UserRole.OPERATOR])),
+):
+    return await _handle_csv_import(
+        CSVImportType.FAILURES, file, idempotency_key, current_user, db
+    )
+
+
+@imports_router.get(
+    "/{job_id}",
+    response_model=CSVImportJobResponse,
+)
+async def get_import_job(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current_user = Depends(require_role([UserRole.MAINTAINER, UserRole.OPERATOR])),
+):
+    job = CSVImportJobService.get_job(db, job_id)
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Import job not found",
+        )
+
+    return _build_import_job_response(job)

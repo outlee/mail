@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     kpi_calendar_schedule_hour: str = "0"
     kpi_batch_size: int = 100
 
+    # CSV Imports
+    csv_import_max_bytes: int = 5 * 1024 * 1024
+    csv_import_storage_path: str = "./tmp/csv_imports"
+    csv_import_idempotency_ttl_minutes: int = 60
+    csv_import_error_sample_size: int = 10
+
 
 @lru_cache()
 def get_settings() -> Settings:

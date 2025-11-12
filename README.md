@@ -301,27 +301,61 @@ All configuration is managed through environment variables. Copy `.env.example` 
 
 ## 🧪 Testing
 
+The MTBF Platform includes comprehensive automated testing with pytest (backend) and Playwright (frontend E2E).
+
+### Quick Start
+
+```bash
+# Run all backend tests with coverage (requires ≥80%)
+make test
+
+# Run frontend E2E tests
+make test-e2e
+
+# Run all tests (backend + E2E)
+make test-all
+```
+
 ### Backend Tests
 
 ```bash
-# Run all tests
-make test
+# Run all tests with coverage
+cd backend
+pytest
 
 # Run specific test file
-cd backend
-pytest tests/test_health.py
+pytest tests/test_services.py
 
-# Run with coverage
+# Run specific test
+pytest tests/test_services.py::TestAssetService::test_create_asset
+
+# Generate HTML coverage report
 pytest --cov=app --cov-report=html
 ```
 
-### Frontend Tests
+**Coverage Requirements:**
+- Minimum: 80% (enforced)
+- Reports: `reports/coverage/backend/`
+
+### Frontend E2E Tests
 
 ```bash
+# Run all E2E tests (headless)
 cd frontend
-npm run test:e2e  # Run Playwright E2E tests
-npm run test:e2e:debug  # Debug Playwright tests
+npm run test:e2e
+
+# Run in debug mode
+npm run test:e2e:debug
+
+# View test report
+npx playwright show-report ../reports/playwright
 ```
+
+**Test Coverage:**
+- Authentication flows (login, logout, validation)
+- Dashboard navigation and responsiveness
+- Alerts management (create, view, acknowledge)
+- Role-based access control
 
 ### Worker Tests
 
@@ -329,6 +363,37 @@ npm run test:e2e:debug  # Debug Playwright tests
 cd worker
 pytest  # Run worker tests with coverage
 ```
+
+### Test Reports
+
+All test reports are stored in `reports/`:
+
+```
+reports/
+├── coverage/
+│   └── backend/        # HTML coverage reports
+├── junit/
+│   ├── backend-results.xml
+│   └── e2e-results.xml
+└── playwright/         # E2E test reports with screenshots/videos
+```
+
+### Demo Data Seeding
+
+Populate the database with sample data for testing and demos:
+
+```bash
+# Seed with demo data
+make seed
+
+# Or run directly
+python scripts/seed_demo.py
+```
+
+**Demo Credentials:**
+- Admin: `admin@mtbf.local` / `admin123`
+- Operator: `operator@mtbf.local` / `operator123`
+- Manager: `manager@mtbf.local` / `manager123`
 
 ## 🔄 Continuous Integration
 

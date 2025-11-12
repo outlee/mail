@@ -1,10 +1,7 @@
 # MTBF Platform
 
-<<<<<<< HEAD
-=======
 [![CI Pipeline](https://github.com/your-username/mtbf-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/your-username/mtbf-platform/actions/workflows/ci.yml)
 
->>>>>>> origin/main
 A modern full-stack platform built with FastAPI, Celery, React, and Docker.
 
 ## 🏗️ Architecture
@@ -84,8 +81,6 @@ make install       # Install dependencies locally
   - Pydantic settings management
   - Structured logging
 
-<<<<<<< HEAD
-=======
 #### CSV Import API
 
 The API exposes CSV ingestion endpoints that validate payloads, persist raw files, and process records via Celery workers.
@@ -137,7 +132,6 @@ asset-001,FAIL-001,2023-10-01T02:15:00Z,Unexpected shutdown,2023-10-01T03:00:00Z
 
 Use `GET /api/v1/imports/{job_id}` to poll progress. Completed jobs with partial failures surface a non-empty `error_sample` array and descriptive message while still committing valid rows.
 
->>>>>>> origin/main
 ### Worker Service
 
 - **Technology**: Celery
@@ -307,7 +301,6 @@ All configuration is managed through environment variables. Copy `.env.example` 
 
 ## 🧪 Testing
 
-<<<<<<< HEAD
 The MTBF Platform includes comprehensive automated testing with pytest (backend) and Playwright (frontend E2E).
 
 ### Quick Start
@@ -364,6 +357,13 @@ npx playwright show-report ../reports/playwright
 - Alerts management (create, view, acknowledge)
 - Role-based access control
 
+### Worker Tests
+
+```bash
+cd worker
+pytest  # Run worker tests with coverage
+```
+
 ### Test Reports
 
 All test reports are stored in `reports/`:
@@ -394,37 +394,6 @@ python scripts/seed_demo.py
 - Admin: `admin@mtbf.local` / `admin123`
 - Operator: `operator@mtbf.local` / `operator123`
 - Manager: `manager@mtbf.local` / `manager123`
-
-For detailed testing documentation, see [TESTING.md](TESTING.md).
-=======
-### Backend Tests
-
-```bash
-# Run all tests
-make test
-
-# Run specific test file
-cd backend
-pytest tests/test_health.py
-
-# Run with coverage
-pytest --cov=app --cov-report=html
-```
-
-### Frontend Tests
-
-```bash
-cd frontend
-npm run test:e2e  # Run Playwright E2E tests
-npm run test:e2e:debug  # Debug Playwright tests
-```
-
-### Worker Tests
-
-```bash
-cd worker
-pytest  # Run worker tests with coverage
-```
 
 ## 🔄 Continuous Integration
 
@@ -516,7 +485,6 @@ The CI pipeline generates the following artifacts:
 - **Integration Logs**: Docker compose logs when integration tests fail
 
 These artifacts are available for download from the GitHub Actions run page.
->>>>>>> origin/main
 
 ## 🐛 Troubleshooting
 
